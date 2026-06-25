@@ -27,6 +27,7 @@ interface SelectionOverlayProps {
   dropTargetId?: string | null;
   dropPosition?: 'before' | 'after' | 'inside';
   dropTargetRect?: Rect | null;
+  onDragStart?: (id: string) => void;
 }
 
 export function SelectionOverlay({
@@ -43,7 +44,8 @@ export function SelectionOverlay({
   selectedFlexDirection,
   draggedId,
   dropPosition,
-  dropTargetRect
+  dropTargetRect,
+  onDragStart
 }: SelectionOverlayProps) {
   const [altPressed, setAltPressed] = useState(false);
 
@@ -285,12 +287,11 @@ export function SelectionOverlay({
                   <div className={`absolute top-0 left-0 -translate-y-full bg-blue-600 text-white font-mono text-[9px] font-bold px-1.5 py-0.5 rounded-t shadow-md whitespace-nowrap flex items-center gap-1.5 ${draggedId ? 'pointer-events-none' : 'pointer-events-auto'}`}>
                     {/* Grip handle for visual Drag-and-Drop */}
                     <span 
-                      draggable="true"
-                      data-editor-id={selectedElementId}
-                      onDragStart={(e) => {
-                        if (selectedElementId) {
-                          e.dataTransfer.setData('text/plain', selectedElementId);
-                          e.dataTransfer.effectAllowed = 'move';
+                      onMouseDown={(e) => {
+                        if (selectedElementId && onDragStart) {
+                          e.stopPropagation();
+                          e.preventDefault();
+                          onDragStart(selectedElementId);
                         }
                       }}
                       className={`cursor-grab active:cursor-grabbing hover:bg-blue-700/85 p-1.5 rounded transition-colors mr-1.5 flex items-center justify-center shrink-0 border border-blue-500/30 ${draggedId ? 'pointer-events-none' : 'pointer-events-auto'}`}

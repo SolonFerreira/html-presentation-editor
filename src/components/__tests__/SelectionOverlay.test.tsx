@@ -84,9 +84,8 @@ describe('SelectionOverlay Component', () => {
     expect(queryByText('200 × 80')).toBeNull();
     
     // There should be a Grip icon for dragging
-    const gripHandle = container.querySelector('[draggable="true"]');
+    const gripHandle = container.querySelector('[title="Arraste para reposicionar elemento"]');
     expect(gripHandle).not.toBeNull();
-    expect(gripHandle?.getAttribute('data-editor-id')).toBe('el-1');
   });
 
   it('renders drop target indicator box when dropPosition is inside', () => {

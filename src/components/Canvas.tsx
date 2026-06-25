@@ -253,6 +253,166 @@ export function Canvas({
     };
   }, []);
 
+  const dropTargetIdRef = useRef<string | null>(null);
+  const dropPositionRef = useRef<'before' | 'after' | 'inside'>('after');
+
+  const handleDragMouseMove = (clientX: number, clientY: number, isInsideIframe: boolean) => {
+    if (!draggedIdRef.current) return;
+    
+    const iframe = iframeRef.current;
+    if (!iframe || !iframe.contentDocument) return;
+    const iframeDoc = iframe.contentDocument;
+    
+    let x = clientX;
+    let y = clientY;
+    
+    if (!isInsideIframe) {
+      const iframeRect = iframe.getBoundingClientRect();
+      x = clientX - iframeRect.left;
+      y = clientY - iframeRect.top;
+    }
+    
+    const target = iframeDoc.elementFromPoint(x, y) as HTMLElement;
+    if (!target) {
+      setDropTargetId(null);
+      setDropTargetRect(null);
+      dropTargetIdRef.current = null;
+      return;
+    }
+    
+    let currentEl: HTMLElement | null = target;
+    let targetId: string | null = null;
+    
+    while (currentEl && currentEl.tagName !== 'BODY') {
+      if (currentEl.getAttribute('data-editor-locked') === 'true') {
+        currentEl = currentEl.parentElement;
+        continue;
+      }
+      targetId = currentEl.getAttribute('data-editor-id');
+      if (targetId) break;
+      currentEl = currentEl.parentElement;
+    }
+    
+    const activeDraggedId = draggedIdRef.current;
+    if (targetId && activeDraggedId && targetId !== activeDraggedId) {
+      const targetEl = iframeDoc.querySelector(`[data-editor-id="${targetId}"]`) as HTMLElement;
+      const draggedEl = iframeDoc.querySelector(`[data-editor-id="${activeDraggedId}"]`);
+      
+      if (targetEl && draggedEl && !draggedEl.contains(targetEl)) {
+        const rect = targetEl.getBoundingClientRect();
+        const bodyRect = iframeDoc.body ? iframeDoc.body.getBoundingClientRect() : { left: 0, top: 0 };
+        
+        const relativeY = y - rect.top;
+        const isContainer = ['DIV', 'SECTION', 'ARTICLE', 'HEADER', 'FOOTER', 'NAV', 'MAIN'].includes(targetEl.tagName);
+        
+        let position: 'before' | 'after' | 'inside' = 'after';
+        
+        if (isContainer) {
+          const edgeZoneHeight = Math.min(rect.height * 0.2, 16);
+          if (relativeY < edgeZoneHeight) {
+            position = 'before';
+          } else if (relativeY > rect.height - edgeZoneHeight) {
+            position = 'after';
+          } else {
+            position = 'inside';
+          }
+        } else {
+          if (relativeY < rect.height / 2) {
+            position = 'before';
+          } else {
+            position = 'after';
+          }
+        }
+        
+        setDropTargetId(prevId => {
+          if (prevId !== targetId) return targetId;
+          return prevId;
+        });
+        setDropPosition(prevPos => {
+          if (prevPos !== position) return position;
+          return prevPos;
+        });
+        setDropTargetRect(prevRect => {
+          if (
+            !prevRect ||
+            prevRect.top !== rect.top ||
+            prevRect.left !== rect.left ||
+            prevRect.width !== rect.width ||
+            prevRect.height !== rect.height
+          ) {
+            return {
+              top: rect.top,
+              left: rect.left,
+              width: rect.width,
+              height: rect.height,
+              x: Math.round(rect.left - bodyRect.left),
+              y: Math.round(rect.top - bodyRect.top)
+            };
+          }
+          return prevRect;
+        });
+        
+        dropTargetIdRef.current = targetId;
+        dropPositionRef.current = position;
+      } else {
+        setDropTargetId(null);
+        setDropTargetRect(null);
+        dropTargetIdRef.current = null;
+      }
+    } else {
+      setDropTargetId(null);
+      setDropTargetRect(null);
+      dropTargetIdRef.current = null;
+    }
+  };
+
+  useEffect(() => {
+    const activeDraggedId = draggedId;
+    if (!activeDraggedId) return;
+
+    const iframe = iframeRef.current;
+    const iframeDoc = iframe?.contentDocument;
+
+    const handleMouseMoveParent = (e: MouseEvent) => {
+      handleDragMouseMove(e.clientX, e.clientY, false);
+    };
+
+    const handleMouseMoveIframe = (e: MouseEvent) => {
+      handleDragMouseMove(e.clientX, e.clientY, true);
+    };
+
+    const handleMouseUpGlobal = () => {
+      const targetId = dropTargetIdRef.current;
+      const position = dropPositionRef.current;
+      
+      if (activeDraggedId && targetId && onMoveElementToLocation) {
+        onMoveElementToLocation(activeDraggedId, targetId, position);
+      }
+
+      setDraggedId(null);
+      setDropTargetId(null);
+      setDropTargetRect(null);
+      dropTargetIdRef.current = null;
+    };
+
+    window.addEventListener('mousemove', handleMouseMoveParent);
+    window.addEventListener('mouseup', handleMouseUpGlobal);
+
+    if (iframeDoc) {
+      iframeDoc.addEventListener('mousemove', handleMouseMoveIframe);
+      iframeDoc.addEventListener('mouseup', handleMouseUpGlobal);
+    }
+
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMoveParent);
+      window.removeEventListener('mouseup', handleMouseUpGlobal);
+      if (iframeDoc) {
+        iframeDoc.removeEventListener('mousemove', handleMouseMoveIframe);
+        iframeDoc.removeEventListener('mouseup', handleMouseUpGlobal);
+      }
+    };
+  }, [draggedId]);
+
   const handleViewportResizeStart = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -1033,6 +1193,7 @@ export function Canvas({
               dropTargetId={dropTargetId}
               dropPosition={dropPosition}
               dropTargetRect={dropTargetRect}
+              onDragStart={(id) => setDraggedId(id)}
             />
           )}
 
