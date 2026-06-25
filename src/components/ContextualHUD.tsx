@@ -120,7 +120,7 @@ export function ContextualHUD({
   const commonTagOptions = ['div', 'section', 'h1', 'h2', 'h3', 'p', 'button', 'a'];
 
   return (
-    <div className="flex flex-col bg-slate-900/95 backdrop-blur border border-slate-800 rounded-lg shadow-premium p-1 text-slate-300 font-sans text-xs select-none max-w-xl animate-scale-in">
+    <div className="flex flex-col bg-slate-900/95 backdrop-blur border border-slate-800 rounded-lg shadow-premium p-1 text-slate-300 font-sans text-xs select-none max-w-[calc(100%-16px)] md:max-w-xl animate-scale-in transition-all duration-200">
       {/* Row 1: main controls */}
       <div className="flex items-center gap-1">
       

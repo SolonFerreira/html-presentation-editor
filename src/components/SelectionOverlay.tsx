@@ -16,6 +16,9 @@ interface SelectionOverlayProps {
   hoveredTag: string | null;
   quickAction?: (action: string) => void;
   onResizeStart?: (handle: string, startEvent: React.MouseEvent) => void;
+  selectedPadding?: { top: number; right: number; bottom: number; left: number };
+  selectedDisplay?: string;
+  selectedFlexDirection?: string;
 }
 
 export function SelectionOverlay({
@@ -24,7 +27,10 @@ export function SelectionOverlay({
   selectedTag,
   hoveredTag,
   quickAction,
-  onResizeStart
+  onResizeStart,
+  selectedPadding,
+  selectedDisplay,
+  selectedFlexDirection
 }: SelectionOverlayProps) {
   const [altPressed, setAltPressed] = useState(false);
 
@@ -179,6 +185,77 @@ export function SelectionOverlay({
             height: `${selectedRect.height}px`,
           }}
         >
+          {/* Padding overlays (DevTools green style) */}
+          {selectedPadding && (
+            <>
+              {selectedPadding.top > 0 && (
+                <div 
+                  className="absolute bg-emerald-500/15 border-b border-dashed border-emerald-500/30"
+                  style={{ top: 0, left: 0, right: 0, height: `${selectedPadding.top}px` }}
+                />
+              )}
+              {selectedPadding.bottom > 0 && (
+                <div 
+                  className="absolute bg-emerald-500/15 border-t border-dashed border-emerald-500/30"
+                  style={{ bottom: 0, left: 0, right: 0, height: `${selectedPadding.bottom}px` }}
+                />
+              )}
+              {selectedPadding.left > 0 && (
+                <div 
+                  className="absolute bg-emerald-500/15 border-r border-dashed border-emerald-500/30"
+                  style={{ 
+                    top: `${selectedPadding.top}px`, 
+                    bottom: `${selectedPadding.bottom}px`, 
+                    left: 0, 
+                    width: `${selectedPadding.left}px` 
+                  }}
+                />
+              )}
+              {selectedPadding.right > 0 && (
+                <div 
+                  className="absolute bg-emerald-500/15 border-l border-dashed border-emerald-500/30"
+                  style={{ 
+                    top: `${selectedPadding.top}px`, 
+                    bottom: `${selectedPadding.bottom}px`, 
+                    right: 0, 
+                    width: `${selectedPadding.right}px` 
+                  }}
+                />
+              )}
+            </>
+          )}
+
+          {/* Flexbox alignment axis guidelines */}
+          {selectedDisplay === 'flex' && (
+            <>
+              {selectedFlexDirection === 'column' ? (
+                <div className="absolute top-0 bottom-0 left-1/2 -translate-x-1/2 w-0 border-l border-dashed border-blue-500/40 flex items-center justify-center">
+                  <span className="bg-slate-900/90 text-blue-400 font-mono text-[7px] font-bold px-1 py-0.5 rounded border border-blue-500/20 shadow-md">
+                    col ↓
+                  </span>
+                </div>
+              ) : (
+                <div className="absolute left-0 right-0 top-1/2 -translate-y-1/2 h-0 border-t border-dashed border-blue-500/40 flex items-center justify-center">
+                  <span className="bg-slate-900/90 text-blue-400 font-mono text-[7px] font-bold px-1 py-0.5 rounded border border-blue-500/20 shadow-md">
+                    row →
+                  </span>
+                </div>
+              )}
+              
+              {/* Type Badge inside container */}
+              <div className="absolute top-2 right-2 bg-blue-600/95 text-white font-sans text-[8px] font-bold px-1.5 py-0.5 rounded shadow-md z-20 pointer-events-none">
+                FLEX {selectedFlexDirection === 'column' ? 'COL' : 'ROW'}
+              </div>
+            </>
+          )}
+
+          {/* Grid layout visual badge */}
+          {selectedDisplay === 'grid' && (
+            <div className="absolute top-2 right-2 bg-indigo-600/95 text-white font-sans text-[8px] font-bold px-1.5 py-0.5 rounded shadow-md z-20 pointer-events-none">
+              GRID
+            </div>
+          )}
+
           {/* Tag Name Badge */}
           {selectedTag && (
             <div className="absolute top-0 left-0 -translate-y-full bg-blue-600 text-white font-mono text-[9px] font-bold px-2 py-0.5 rounded-t shadow-md whitespace-nowrap flex items-center gap-1.5 pointer-events-auto">

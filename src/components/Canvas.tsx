@@ -87,6 +87,9 @@ export function Canvas({
   const [hoveredRect, setHoveredRect] = useState<Rect | null>(null);
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
   const [hoveredTag, setHoveredTag] = useState<string | null>(null);
+  const [selectedPadding, setSelectedPadding] = useState<{ top: number; right: number; bottom: number; left: number } | undefined>(undefined);
+  const [selectedDisplay, setSelectedDisplay] = useState<string | undefined>(undefined);
+  const [selectedFlexDirection, setSelectedFlexDirection] = useState<string | undefined>(undefined);
 
   // Panning State
   const [spacePressed, setSpacePressed] = useState(false);
@@ -407,13 +410,31 @@ export function Canvas({
           y: Math.round(clientRect.top - bodyRect.top)
         });
         setSelectedTag(selectedEl.tagName);
+
+        const computedStyle = selectedEl.ownerDocument?.defaultView?.getComputedStyle(selectedEl) || window.getComputedStyle(selectedEl);
+        if (computedStyle) {
+          setSelectedPadding({
+            top: parseFloat(computedStyle.paddingTop) || 0,
+            right: parseFloat(computedStyle.paddingRight) || 0,
+            bottom: parseFloat(computedStyle.paddingBottom) || 0,
+            left: parseFloat(computedStyle.paddingLeft) || 0
+          });
+          setSelectedDisplay(computedStyle.display || undefined);
+          setSelectedFlexDirection(computedStyle.flexDirection || undefined);
+        }
       } else {
         setSelectedRect(null);
         setSelectedTag(null);
+        setSelectedPadding(undefined);
+        setSelectedDisplay(undefined);
+        setSelectedFlexDirection(undefined);
       }
     } else {
       setSelectedRect(null);
       setSelectedTag(null);
+      setSelectedPadding(undefined);
+      setSelectedDisplay(undefined);
+      setSelectedFlexDirection(undefined);
     }
 
     // 2. Hovered Rect
@@ -818,6 +839,9 @@ export function Canvas({
               hoveredTag={hoveredTag}
               quickAction={handleQuickAction}
               onResizeStart={handleResizeStart}
+              selectedPadding={selectedPadding}
+              selectedDisplay={selectedDisplay}
+              selectedFlexDirection={selectedFlexDirection}
             />
           )}
 
@@ -829,13 +853,18 @@ export function Canvas({
             const transformVal = isHUDAbove 
               ? 'translate(-50%, -100%)' 
               : 'translate(-50%, 0)';
+            const scaleVal = 1 / zoomScale;
+            const originVal = isHUDAbove ? 'bottom center' : 'top center';
+            const transformCombined = `${transformVal} scale(${scaleVal})`;
             return (
               <div
                 className="absolute pointer-events-auto z-40"
                 style={{
                   left: `${selectedRect.left + selectedRect.width / 2}px`,
                   top: `${topPos}px`,
-                  transform: transformVal,
+                  transform: transformCombined,
+                  transformOrigin: originVal,
+                  transition: 'transform 0.15s cubic-bezier(0.4, 0, 0.2, 1)',
                 }}
               >
                 <ContextualHUD
