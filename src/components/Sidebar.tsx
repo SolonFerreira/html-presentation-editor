@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import type { SemanticElement } from '../types';
 import { 
   Folder, 
@@ -22,8 +22,21 @@ import {
   Plus,
   Search,
   Maximize2,
-  Minimize2
+  Minimize2,
+  AlertTriangle,
+  ShieldAlert,
+  CheckCircle2,
+  Info,
+  ArrowUp,
+  ArrowDown,
+  CornerUpLeft,
+  FolderPlus,
+  FolderMinus,
+  Box,
+  Code,
+  Eraser
 } from 'lucide-react';
+import { runHtmlValidation } from '../utils/validation';
 
 interface SidebarProps {
   semanticTree: SemanticElement[];
@@ -35,6 +48,8 @@ interface SidebarProps {
   activeFile: string | null;
   onSelectFile: (path: string) => void;
   
+  htmlContent: string;
+
   // Actions for Layers Panel
   onToggleLock: (id: string) => void;
   onToggleHide: (id: string) => void;
@@ -44,6 +59,14 @@ interface SidebarProps {
   onRenameElement: (id: string, newName: string) => void;
   onMoveElement?: (draggedId: string, targetId: string) => void;
 
+  // Structural Actions
+  onUnwrapElement: (id: string) => void;
+  onWrapElement: (id: string, tag: 'div' | 'section') => void;
+  onChangeElementTag: (id: string, newTag: string) => void;
+  onClearElementStyles: (id: string) => void;
+  onMoveElementOut: (id: string) => void;
+  onGroupElement: (id: string) => void;
+
   // Insert component from library
   onInsertComponent: (htmlSnippet: string) => void;
 
@@ -52,7 +75,7 @@ interface SidebarProps {
   onRollbackVersion: (versionId: string) => void;
 }
 
-type TabType = 'layers' | 'components' | 'history';
+type TabType = 'layers' | 'components' | 'history' | 'alerts';
 type FilterMode = 'all' | 'hidden' | 'locked' | 'selected';
 
 // Component Library snippets definitions
@@ -147,32 +170,39 @@ const COMPONENT_LIBRARY = [
 // Helper to determine friendly semantic names instead of raw tags
 export function getFriendlyNodeName(node: SemanticElement): string {
   if (node.label) return node.label;
+  if (node.humanName) return node.humanName;
   
   const tag = node.tagName.toLowerCase();
-  const classes = node.classes.map(c => c.toLowerCase());
-  const hasClass = (term: string) => classes.some(c => c.includes(term));
-  
-  if (hasClass('hero')) return 'Hero Section';
-  if (hasClass('nav') || hasClass('navbar') || tag === 'nav') return 'Navigation';
-  if (hasClass('footer') || tag === 'footer') return 'Footer';
-  if (hasClass('card') || hasClass('metric-card')) return 'Metric Card';
-  if (hasClass('metrics-grid')) return 'Feature Grid';
-  if (hasClass('btn') || hasClass('button') || tag === 'button') return 'CTA Button';
-  if (hasClass('faq') || hasClass('accordion')) return 'FAQ Accordion';
-  if (hasClass('timeline') || hasClass('roadmap')) return 'Roadmap Timeline';
-  if (hasClass('badge')) return 'Badge Indicator';
-  
-  if (tag === 'h1') return 'Main Title (H1)';
-  if (tag === 'h2') return 'Section Title (H2)';
-  if (tag === 'h3') return 'Subtitle (H3)';
-  if (tag === 'p') return 'Paragraph';
-  if (tag === 'span') return 'Label Text';
-  if (tag === 'img') return 'Image Asset';
-  if (tag === 'section') return 'Section Wrapper';
-  if (tag === 'header') return 'Header';
-  if (tag === 'aside') return 'Sidebar';
-  
-  return tag + (node.classes.length > 0 ? `.${node.classes[0]}` : '');
+  const firstClass = node.classes.length > 0 ? `.${node.classes[0]}` : '';
+  return tag + firstClass;
+}
+
+export function findElementById(nodes: SemanticElement[], id: string): SemanticElement | null {
+  for (const node of nodes) {
+    if (node.id === id) return node;
+    if (node.children && node.children.length > 0) {
+      const found = findElementById(node.children, id);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
+export function hasParentNode(nodes: SemanticElement[], targetId: string): boolean {
+  const traverse = (currentNodes: SemanticElement[], parentId: string | null): boolean => {
+    for (const node of currentNodes) {
+      if (node.id === targetId) {
+        return parentId !== null;
+      }
+      if (node.children && node.children.length > 0) {
+        if (traverse(node.children, node.id)) {
+          return true;
+        }
+      }
+    }
+    return false;
+  };
+  return traverse(nodes, null);
 }
 
 export function Sidebar({
@@ -185,12 +215,22 @@ export function Sidebar({
   activeFile,
   onSelectFile,
   
+  htmlContent,
+
   onToggleLock,
   onToggleHide,
   onDuplicateElement,
   onDeleteElement,
+  onReorderElement,
   onRenameElement,
   onMoveElement,
+
+  onUnwrapElement,
+  onWrapElement,
+  onChangeElementTag,
+  onClearElementStyles,
+  onMoveElementOut,
+  onGroupElement,
 
   onInsertComponent,
 
@@ -198,6 +238,14 @@ export function Sidebar({
   onRollbackVersion
 }: SidebarProps) {
   const [activeTab, setActiveTab] = useState<TabType>('layers');
+
+  // Audit Validation Alerts
+  const validationAlerts = useMemo(() => {
+    return runHtmlValidation(semanticTree, htmlContent || '');
+  }, [semanticTree, htmlContent]);
+
+  const errorCount = validationAlerts.filter(a => a.type === 'error').length;
+  const totalAlerts = validationAlerts.length;
   const [collapsedNodes, setCollapsedNodes] = useState<Record<string, boolean>>({});
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
@@ -314,8 +362,28 @@ export function Sidebar({
     return null;
   };
 
+  const isTechnicalNode = (node: SemanticElement): boolean => {
+    const tagName = node.tagName.toLowerCase();
+    if ((tagName === 'div' || tagName === 'span') && 
+        node.classes.length === 0 && 
+        !node.label && 
+        (!node.text || node.text.trim().length === 0) &&
+        node.role === 'unknown') {
+      return true;
+    }
+    return false;
+  };
+
   // Render tree item recursively
-  const renderLayerItem = (node: SemanticElement, depth = 0) => {
+  const renderLayerItem = (node: SemanticElement, depth = 0): React.ReactNode => {
+    if (isTechnicalNode(node)) {
+      return (
+        <>
+          {node.children.map(child => renderLayerItem(child, depth))}
+        </>
+      );
+    }
+
     if (!isNodeVisible(node)) return null;
 
     const isSelected = selectedElementId === node.id;
@@ -521,6 +589,24 @@ export function Sidebar({
           <History className="w-3.5 h-3.5" />
           History
         </button>
+        <button
+          onClick={() => setActiveTab('alerts')}
+          className={`flex-1 py-2 flex items-center justify-center gap-1.5 text-xs font-bold border-b-2 transition-colors cursor-pointer ${
+            activeTab === 'alerts'
+              ? 'border-blue-500 text-blue-400 bg-slate-900/10'
+              : 'border-transparent text-slate-500 hover:text-slate-300'
+          }`}
+        >
+          <AlertTriangle className={`w-3.5 h-3.5 ${totalAlerts > 0 ? (errorCount > 0 ? 'text-red-500' : 'text-amber-500') : 'text-slate-500'}`} />
+          Alerts
+          {totalAlerts > 0 && (
+            <span className={`px-1.5 py-0.2 rounded-full text-[8px] font-extrabold text-white ${
+              errorCount > 0 ? 'bg-red-500' : 'bg-amber-500'
+            }`}>
+              {totalAlerts}
+            </span>
+          )}
+        </button>
       </div>
 
       {/* 3. Global controls (expand/collapse) visible when in layers tab */}
@@ -670,6 +756,74 @@ export function Sidebar({
             )}
           </div>
         )}
+
+        {/* Tab 4 Alerts/Validation */}
+        {activeTab === 'alerts' && (
+          <div className="flex-1 flex flex-col overflow-hidden animate-fade-in divide-y divide-slate-850 select-none">
+            <div className="p-3 bg-slate-950/40 flex justify-between items-center shrink-0">
+              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+                Auditoria de Qualidade
+              </span>
+              <span className="text-[9px] text-slate-500 font-medium">
+                {totalAlerts === 0 ? 'Tudo certo!' : `${totalAlerts} pendências`}
+              </span>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-2 space-y-2 no-scrollbar">
+              {validationAlerts.length === 0 ? (
+                <div className="flex flex-col items-center justify-center p-8 text-center h-full">
+                  <CheckCircle2 className="w-8 h-8 text-emerald-500 mb-2 stroke-[1.5]" />
+                  <p className="text-slate-300 font-semibold text-xs mb-1">Nenhum problema encontrado!</p>
+                  <p className="text-[9px] text-slate-500 max-w-[200px] leading-relaxed">
+                    Seu documento segue boas práticas de acessibilidade, semântica e hierarquia estrutural.
+                  </p>
+                </div>
+              ) : (
+                validationAlerts.map(alert => (
+                  <div
+                    key={alert.id}
+                    onClick={() => {
+                      if (alert.elementId !== 'root') {
+                        onSelectElement(alert.elementId);
+                      }
+                    }}
+                    className={`p-2.5 rounded-lg border text-left cursor-pointer transition-colors bg-slate-950/60 hover:bg-slate-900/60 ${
+                      alert.type === 'error'
+                        ? 'border-red-950/45 hover:border-red-900/60'
+                        : alert.type === 'warning'
+                        ? 'border-amber-950/45 hover:border-amber-900/60'
+                        : 'border-blue-950/45 hover:border-blue-900/60'
+                    }`}
+                  >
+                    <div className="flex items-start gap-2">
+                      {alert.type === 'error' ? (
+                        <ShieldAlert className="w-3.5 h-3.5 text-red-500 shrink-0 mt-0.5" />
+                      ) : alert.type === 'warning' ? (
+                        <AlertTriangle className="w-3.5 h-3.5 text-amber-500 shrink-0 mt-0.5" />
+                      ) : (
+                        <Info className="w-3.5 h-3.5 text-blue-400 shrink-0 mt-0.5" />
+                      )}
+                      
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[9px] font-bold text-slate-300 truncate max-w-[120px]">
+                            {alert.elementName}
+                          </span>
+                          <span className="px-1 py-0.2 rounded text-[7px] font-semibold bg-slate-900 text-slate-400 border border-slate-800 uppercase tracking-wider">
+                            {alert.category}
+                          </span>
+                        </div>
+                        <p className="text-[10px] text-slate-455 leading-relaxed">
+                          {alert.message}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* 6. Breadcrumbs Footer */}
@@ -693,64 +847,188 @@ export function Sidebar({
       )}
 
       {/* CUSTOM FLOATING CONTEXT MENU */}
-      {contextMenu && (
-        <div
-          ref={contextMenuRef}
-          className="fixed bg-slate-900 border border-slate-800 rounded-lg shadow-2xl p-1 z-50 w-44 animate-scale-in glass-panel shadow-premium text-slate-300 font-sans"
-          style={{ top: `${contextMenu.y}px`, left: `${contextMenu.x}px` }}
-        >
-          <button
-            onClick={() => {
-              onDuplicateElement(contextMenu.nodeId);
-              setContextMenu(null);
-            }}
-            className="w-full text-left px-2.5 py-1.5 rounded hover:bg-slate-800/60 text-xs flex items-center justify-between cursor-pointer"
+      {contextMenu && (() => {
+        const currentNode = findElementById(semanticTree, contextMenu.nodeId);
+        const hasParent = hasParentNode(semanticTree, contextMenu.nodeId);
+        const menuHeight = 440;
+        const adjustedY = contextMenu.y + menuHeight > window.innerHeight
+          ? Math.max(10, window.innerHeight - menuHeight - 10)
+          : contextMenu.y;
+        return (
+          <div
+            ref={contextMenuRef}
+            className="fixed bg-slate-900 border border-slate-800 rounded-lg shadow-2xl p-1.5 z-50 w-52 animate-scale-in glass-panel shadow-premium text-slate-300 font-sans flex flex-col gap-0.5"
+            style={{ top: `${adjustedY}px`, left: `${contextMenu.x}px` }}
           >
-            <span className="flex items-center gap-2"><Copy className="w-3.5 h-3.5" /> Duplicar</span>
-            <span className="text-[9px] text-slate-600 font-mono">⌘D</span>
-          </button>
-          
-          <button
-            onClick={() => {
-              onToggleLock(contextMenu.nodeId);
-              setContextMenu(null);
-            }}
-            className="w-full text-left px-2.5 py-1.5 rounded hover:bg-slate-800/60 text-xs flex items-center gap-2 cursor-pointer"
-          >
-            <Lock className="w-3.5 h-3.5" /> Bloquear/Desbloquear
-          </button>
+            {currentNode && (
+              <div className="px-2 py-1 text-[10px] text-slate-500 font-medium border-b border-slate-800/80 mb-1 truncate">
+                Elemento: <span className="text-slate-400 font-mono font-bold">&lt;{currentNode.tagName.toLowerCase()}&gt;</span>
+              </div>
+            )}
 
-          <button
-            onClick={() => {
-              onToggleHide(contextMenu.nodeId);
-              setContextMenu(null);
-            }}
-            className="w-full text-left px-2.5 py-1.5 rounded hover:bg-slate-800/60 text-xs flex items-center gap-2 cursor-pointer"
-          >
-            <Eye className="w-3.5 h-3.5" /> Ocultar/Exibir
-          </button>
+            <button
+              onClick={() => {
+                onDuplicateElement(contextMenu.nodeId);
+                setContextMenu(null);
+              }}
+              className="w-full text-left px-2.5 py-1 rounded hover:bg-slate-800/60 text-xs flex items-center justify-between cursor-pointer"
+            >
+              <span className="flex items-center gap-2"><Copy className="w-3.5 h-3.5" /> Duplicar</span>
+              <span className="text-[9px] text-slate-600 font-mono">⌘D</span>
+            </button>
+            
+            <button
+              onClick={() => {
+                onToggleLock(contextMenu.nodeId);
+                setContextMenu(null);
+              }}
+              className="w-full text-left px-2.5 py-1 rounded hover:bg-slate-800/60 text-xs flex items-center gap-2 cursor-pointer"
+            >
+              {currentNode?.isLocked ? <Unlock className="w-3.5 h-3.5 text-amber-500" /> : <Lock className="w-3.5 h-3.5" />}
+              {currentNode?.isLocked ? 'Desbloquear' : 'Bloquear'}
+            </button>
 
-          <button
-            onClick={(e) => startRename(contextMenu.nodeId, '', e)}
-            className="w-full text-left px-2.5 py-1.5 rounded hover:bg-slate-800/60 text-xs flex items-center gap-2 cursor-pointer"
-          >
-            <Type className="w-3.5 h-3.5" /> Renomear Camada
-          </button>
+            <button
+              onClick={() => {
+                onToggleHide(contextMenu.nodeId);
+                setContextMenu(null);
+              }}
+              className="w-full text-left px-2.5 py-1 rounded hover:bg-slate-800/60 text-xs flex items-center gap-2 cursor-pointer"
+            >
+              {currentNode?.isHidden ? <Eye className="w-3.5 h-3.5 text-sky-400" /> : <EyeOff className="w-3.5 h-3.5" />}
+              {currentNode?.isHidden ? 'Exibir' : 'Ocultar'}
+            </button>
 
-          <div className="h-px bg-slate-800/60 my-1" />
+            <button
+              onClick={(e) => startRename(contextMenu.nodeId, currentNode ? getFriendlyNodeName(currentNode) : '', e)}
+              className="w-full text-left px-2.5 py-1 rounded hover:bg-slate-800/60 text-xs flex items-center gap-2 cursor-pointer"
+            >
+              <Type className="w-3.5 h-3.5" /> Renomear Camada
+            </button>
 
-          <button
-            onClick={() => {
-              onDeleteElement(contextMenu.nodeId);
-              setContextMenu(null);
-            }}
-            className="w-full text-left px-2.5 py-1.5 rounded hover:bg-red-950/40 text-red-400 text-xs flex items-center justify-between cursor-pointer"
-          >
-            <span className="flex items-center gap-2"><Trash2 className="w-3.5 h-3.5 text-red-500" /> Excluir</span>
-            <span className="text-[9px] text-red-500/60 font-mono">Del</span>
-          </button>
-        </div>
-      )}
+            <div className="h-px bg-slate-800/60 my-1" />
+
+            {/* Reordering */}
+            <div className="px-2 py-0.5 text-[9px] text-slate-500 font-bold uppercase tracking-wider">Organizar</div>
+
+            <button
+              onClick={() => {
+                onReorderElement(contextMenu.nodeId, 'up');
+                setContextMenu(null);
+              }}
+              className="w-full text-left px-2.5 py-1 rounded hover:bg-slate-800/60 text-xs flex items-center gap-2 cursor-pointer"
+            >
+              <ArrowUp className="w-3.5 h-3.5" /> Mover para Cima
+            </button>
+
+            <button
+              onClick={() => {
+                onReorderElement(contextMenu.nodeId, 'down');
+                setContextMenu(null);
+              }}
+              className="w-full text-left px-2.5 py-1 rounded hover:bg-slate-800/60 text-xs flex items-center gap-2 cursor-pointer"
+            >
+              <ArrowDown className="w-3.5 h-3.5" /> Mover para Baixo
+            </button>
+
+            {hasParent && (
+              <button
+                onClick={() => {
+                  onMoveElementOut(contextMenu.nodeId);
+                  setContextMenu(null);
+                }}
+                className="w-full text-left px-2.5 py-1 rounded hover:bg-slate-800/60 text-xs flex items-center gap-2 cursor-pointer"
+              >
+                <CornerUpLeft className="w-3.5 h-3.5" /> Mover para Fora (Pai)
+              </button>
+            )}
+
+            <div className="h-px bg-slate-800/60 my-1" />
+
+            {/* Structural actions */}
+            <div className="px-2 py-0.5 text-[9px] text-slate-500 font-bold uppercase tracking-wider">Estrutura</div>
+
+            <button
+              onClick={() => {
+                onGroupElement(contextMenu.nodeId);
+                setContextMenu(null);
+              }}
+              className="w-full text-left px-2.5 py-1 rounded hover:bg-slate-800/60 text-xs flex items-center gap-2 cursor-pointer"
+            >
+              <FolderPlus className="w-3.5 h-3.5" /> Agrupar em Container
+            </button>
+
+            <button
+              onClick={() => {
+                onWrapElement(contextMenu.nodeId, 'div');
+                setContextMenu(null);
+              }}
+              className="w-full text-left px-2.5 py-1 rounded hover:bg-slate-800/60 text-xs flex items-center gap-2 cursor-pointer"
+            >
+              <Box className="w-3.5 h-3.5" /> Envolver em &lt;div&gt;
+            </button>
+
+            <button
+              onClick={() => {
+                onWrapElement(contextMenu.nodeId, 'section');
+                setContextMenu(null);
+              }}
+              className="w-full text-left px-2.5 py-1 rounded hover:bg-slate-800/60 text-xs flex items-center gap-2 cursor-pointer"
+            >
+              <Layers className="w-3.5 h-3.5" /> Envolver em &lt;section&gt;
+            </button>
+
+            <button
+              onClick={() => {
+                onUnwrapElement(contextMenu.nodeId);
+                setContextMenu(null);
+              }}
+              className="w-full text-left px-2.5 py-1 rounded hover:bg-slate-800/60 text-xs flex items-center gap-2 cursor-pointer"
+            >
+              <FolderMinus className="w-3.5 h-3.5" /> Desagrupar (Remover Pai)
+            </button>
+
+            <button
+              onClick={() => {
+                const newTag = prompt(
+                  "Digite a nova tag HTML (ex: div, section, button, a, h1, h2, p):", 
+                  currentNode?.tagName.toLowerCase()
+                );
+                if (newTag && newTag.trim()) {
+                  onChangeElementTag(contextMenu.nodeId, newTag.trim().toLowerCase());
+                }
+                setContextMenu(null);
+              }}
+              className="w-full text-left px-2.5 py-1 rounded hover:bg-slate-800/60 text-xs flex items-center gap-2 cursor-pointer"
+            >
+              <Code className="w-3.5 h-3.5" /> Alterar Tag HTML...
+            </button>
+
+            <button
+              onClick={() => {
+                onClearElementStyles(contextMenu.nodeId);
+                setContextMenu(null);
+              }}
+              className="w-full text-left px-2.5 py-1 rounded hover:bg-slate-800/60 text-xs flex items-center gap-2 cursor-pointer"
+            >
+              <Eraser className="w-3.5 h-3.5" /> Limpar Estilos Inline
+            </button>
+
+            <div className="h-px bg-slate-800/60 my-1" />
+
+            <button
+              onClick={() => {
+                onDeleteElement(contextMenu.nodeId);
+                setContextMenu(null);
+              }}
+              className="w-full text-left px-2.5 py-1 rounded hover:bg-red-950/40 text-red-400 text-xs flex items-center justify-between cursor-pointer"
+            >
+              <span className="flex items-center gap-2"><Trash2 className="w-3.5 h-3.5 text-red-500" /> Excluir</span>
+              <span className="text-[9px] text-red-500/60 font-mono">Del</span>
+            </button>
+          </div>
+        );
+      })()}
     </aside>
   );
 }

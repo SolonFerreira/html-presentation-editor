@@ -1,8 +1,8 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useFileSystem } from './hooks/useFileSystem';
 import { Sidebar } from './components/Sidebar';
+import { DiffReviewModal } from './components/DiffReviewModal';
 import { Canvas } from './components/Canvas';
-import { PropertyPanel } from './components/PropertyPanel';
 import { AIPanel } from './components/AIPanel';
 import { 
   injectEditorIds, 
@@ -41,7 +41,6 @@ export default function App() {
     project,
     openDirectory,
     saveFile,
-    saveImage,
     setProject
   } = useFileSystem();
 
@@ -75,6 +74,7 @@ export default function App() {
     contentMutations: any[];
     originalHtml: string;
   } | null>(null);
+  const [isDiffModalOpen, setIsDiffModalOpen] = useState(false);
 
   // Persist API Key
   const handleSaveApiKey = (key: string) => {
@@ -143,20 +143,7 @@ export default function App() {
     return prepareHtmlForPreview(htmlContent, project.files);
   }, [htmlContent, project]);
 
-  // Find currently selected element in the semantic tree
-  const selectedElement = useMemo(() => {
-    if (!selectedElementId || semanticTree.length === 0) return null;
-    
-    const findNode = (nodes: SemanticElement[]): SemanticElement | null => {
-      for (const node of nodes) {
-        if (node.id === selectedElementId) return node;
-        const found = findNode(node.children);
-        if (found) return found;
-      }
-      return null;
-    };
-    return findNode(semanticTree);
-  }, [selectedElementId, semanticTree]);
+
 
   // Save current HTML change, update semantic tree, and write clean HTML back to filesytem
   const updateHtml = async (newHtml: string, description = 'Alteração visual', pushToUndo = true) => {
@@ -286,12 +273,6 @@ export default function App() {
     }
   };
 
-  // Upload/Save Image locally
-  const handleUploadImage = async (relativePath: string, file: File): Promise<string | undefined> => {
-    const blobUrl = await saveImage(relativePath, file);
-    return blobUrl;
-  };
-
   // Send Prompt to Gemini AI and load in Diff Review Queue (instead of auto-applying)
   const handleSendPrompt = async (prompt: string) => {
     if (!htmlContent) return;
@@ -309,6 +290,7 @@ export default function App() {
         contentMutations: aiResponse.contentMutations,
         originalHtml: htmlContent
       });
+      setIsDiffModalOpen(true);
       setAiExplanation('Aguardando aprovação das alterações...');
     } catch (err: any) {
       console.error(err);
@@ -485,6 +467,105 @@ export default function App() {
       const parent = targetEl.parentElement;
       parent.insertBefore(draggedEl, targetEl);
       await updateHtml(doc.documentElement.outerHTML, `Moveu elemento ${draggedEl.tagName.toLowerCase()}`);
+    }
+  };
+
+  const handleUnwrapElement = async (elementId: string) => {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(htmlContent, 'text/html');
+    const el = doc.querySelector(`[data-editor-id="${elementId}"]`);
+    if (el && el.parentElement) {
+      const parent = el.parentElement;
+      while (el.firstChild) {
+        parent.insertBefore(el.firstChild, el);
+      }
+      el.remove();
+      setSelectedElementId(null);
+      await updateHtml(doc.documentElement.outerHTML, `Desagrupou elemento`);
+    }
+  };
+
+  const handleWrapElement = async (elementId: string, tag: 'div' | 'section') => {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(htmlContent, 'text/html');
+    const el = doc.querySelector(`[data-editor-id="${elementId}"]`);
+    if (el && el.parentElement) {
+      const parent = el.parentElement;
+      const wrapEl = doc.createElement(tag);
+      const startId = getMaxEditorId(htmlContent) + 1;
+      wrapEl.setAttribute('data-editor-id', `el-${startId}`);
+      wrapEl.setAttribute('data-editor-label', tag === 'div' ? 'Div Wrapper' : 'Section Wrapper');
+      
+      parent.insertBefore(wrapEl, el);
+      wrapEl.appendChild(el);
+      
+      await updateHtml(doc.documentElement.outerHTML, `Envolveu em ${tag}`);
+      setSelectedElementId(`el-${startId}`);
+    }
+  };
+
+  const handleChangeElementTag = async (elementId: string, newTagName: string) => {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(htmlContent, 'text/html');
+    const el = doc.querySelector(`[data-editor-id="${elementId}"]`);
+    if (el && el.parentElement) {
+      const parent = el.parentElement;
+      const newTagNameUpper = newTagName.toUpperCase();
+      
+      // Validation check for tags nesting
+      if (newTagNameUpper === 'P' && Array.from(el.querySelectorAll('div, section, p, table, form')).length > 0) {
+        alert('Não é possível converter para <p> porque o elemento possui blocos como div/section que invalidariam a hierarquia HTML.');
+        return;
+      }
+      
+      const newEl = doc.createElement(newTagNameUpper);
+      
+      // Copy attributes
+      for (const attr of Array.from(el.attributes)) {
+        newEl.setAttribute(attr.name, attr.value);
+      }
+      
+      // Conversion rules
+      if (newTagNameUpper === 'BUTTON') {
+        newEl.removeAttribute('href');
+        newEl.removeAttribute('target');
+      } else if (newTagNameUpper === 'A') {
+        if (!newEl.hasAttribute('href')) {
+          newEl.setAttribute('href', '#');
+        }
+      }
+      
+      // Move children
+      while (el.firstChild) {
+        newEl.appendChild(el.firstChild);
+      }
+      
+      parent.replaceChild(newEl, el);
+      await updateHtml(doc.documentElement.outerHTML, `Alterou tag para ${newTagName.toLowerCase()}`);
+    }
+  };
+
+  const handleClearElementStyles = async (elementId: string) => {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(htmlContent, 'text/html');
+    const el = doc.querySelector(`[data-editor-id="${elementId}"]`);
+    if (el) {
+      el.removeAttribute('style');
+      await updateHtml(doc.documentElement.outerHTML, `Limpou estilos de ${el.tagName.toLowerCase()}`);
+    }
+  };
+
+  const handleMoveElementOut = async (elementId: string) => {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(htmlContent, 'text/html');
+    const el = doc.querySelector(`[data-editor-id="${elementId}"]`);
+    if (el && el.parentElement && el.parentElement.parentElement && el.parentElement.tagName !== 'BODY') {
+      const parent = el.parentElement;
+      const grandParent = parent.parentElement;
+      if (grandParent) {
+        grandParent.insertBefore(el, parent.nextSibling);
+        await updateHtml(doc.documentElement.outerHTML, `Moveu ${el.tagName.toLowerCase()} para fora`);
+      }
     }
   };
 
@@ -964,6 +1045,8 @@ export default function App() {
             activeFile={activeHtmlPath}
             onSelectFile={handleSelectFile}
             
+            htmlContent={htmlContent}
+
             onToggleLock={handleToggleLock}
             onToggleHide={handleToggleHide}
             onDuplicateElement={handleDuplicateElement}
@@ -971,6 +1054,14 @@ export default function App() {
             onReorderElement={handleReorderElement}
             onRenameElement={handleRenameElement}
             onMoveElement={handleMoveElement}
+
+            onUnwrapElement={handleUnwrapElement}
+            onWrapElement={handleWrapElement}
+            onChangeElementTag={handleChangeElementTag}
+            onClearElementStyles={handleClearElementStyles}
+            onMoveElementOut={handleMoveElementOut}
+            onGroupElement={handleGroupElement}
+
             onInsertComponent={handleInsertComponent}
             versionHistory={versionHistory}
             onRollbackVersion={handleRollbackVersion}
@@ -987,6 +1078,15 @@ export default function App() {
           onUpdateText={handleUpdateText}
           onDeleteElement={handleDeleteElement}
           onQuickFontChange={handleQuickFontChange}
+          onUpdateStyles={handleUpdateStyles}
+          onUnwrapElement={handleUnwrapElement}
+          onWrapElement={handleWrapElement}
+          onChangeElementTag={handleChangeElementTag}
+          onClearElementStyles={handleClearElementStyles}
+          onDuplicateElement={handleDuplicateElement}
+          onReorderElement={handleReorderElement}
+          onMoveElementOut={handleMoveElementOut}
+          onGroupElement={handleGroupElement}
           
           zoomScale={zoomScale}
           onZoomChange={setZoomScale}
@@ -994,15 +1094,7 @@ export default function App() {
           presentationMode={presentationMode}
         />
 
-        {/* Right properties detail panel */}
-        {!presentationMode && (
-          <PropertyPanel
-            selectedElement={selectedElement}
-            onUpdateStyles={handleUpdateStyles}
-            onUpdateText={handleUpdateText}
-            onUploadImage={handleUploadImage}
-          />
-        )}
+
 
         {/* Floating AI Command Bar (Raycast Design) */}
         {!presentationMode && activeHtmlPath && (
@@ -1022,8 +1114,24 @@ export default function App() {
             } : null}
             onApplyChanges={handleApplyChanges}
             onCancelChanges={handleCancelChanges}
+            onShowDetails={() => setIsDiffModalOpen(true)}
           />
         )}
+
+        <DiffReviewModal
+          isOpen={isDiffModalOpen}
+          onClose={() => setIsDiffModalOpen(false)}
+          pendingChanges={pendingChanges}
+          semanticTree={semanticTree}
+          onApply={() => {
+            handleApplyChanges();
+            setIsDiffModalOpen(false);
+          }}
+          onCancel={() => {
+            handleCancelChanges();
+            setIsDiffModalOpen(false);
+          }}
+        />
 
         <CommandPalette
           isOpen={isCommandPaletteOpen}

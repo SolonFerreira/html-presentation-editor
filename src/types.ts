@@ -1,7 +1,29 @@
+export type SemanticRole = 
+  | 'slide' 
+  | 'navbar'
+  | 'footer'
+  | 'hero'
+  | 'cta'
+  | 'card'
+  | 'grid'
+  | 'pricing'
+  | 'faq'
+  | 'testimonial'
+  | 'table'
+  | 'form'
+  | 'section'
+  | 'container'
+  | 'title' 
+  | 'text' 
+  | 'image' 
+  | 'button' 
+  | 'unknown';
+
 export interface SemanticElement {
   id: string;        // Unique temporary editor ID (e.g., 'el-1', 'el-2')
   tagName: string;   // HTML tag name (e.g., 'DIV', 'H1', 'IMG')
-  role: 'slide' | 'card' | 'title' | 'text' | 'image' | 'container' | 'button' | 'unknown';
+  role: SemanticRole; // Expanded semantic role
+  humanName: string; // Precomputed friendly contextual name
   text?: string;     // Inner text if applicable (and short)
   classes: string[]; // List of CSS classes
   style: Record<string, string>; // Inline styles (or computed styles)
@@ -11,6 +33,7 @@ export interface SemanticElement {
   isLocked?: boolean; // If element is locked in layers panel
   isHidden?: boolean; // If element is hidden in layers panel
   label?: string; // Friendly renamed layer name
+  outerHTML?: string; // Cache of the original HTML content
 }
 
 export interface FileItem {

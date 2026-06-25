@@ -1,4 +1,4 @@
-import type { FileItem, SemanticElement } from '../types';
+import type { FileItem, SemanticElement, SemanticRole } from '../types';
 
 /**
  * Injects temporary `data-editor-id` attributes to all elements in the HTML body
@@ -72,30 +72,184 @@ export function stripEditorIds(htmlContent: string): string {
 }
 
 /**
- * Helper to determine semantic role based on tag and class names
+ * Helper to determine semantic role based on tag, classes, and attributes
  */
-function getSemanticRole(element: Element): SemanticElement['role'] {
+function getSemanticRole(element: Element): SemanticRole {
   const tagName = element.tagName.toUpperCase();
   const classes = Array.from(element.classList).join(' ').toLowerCase();
+  const id = (element.getAttribute('id') || '').toLowerCase();
+  const roleAttr = (element.getAttribute('role') || '').toLowerCase();
 
   if (tagName === 'BODY') return 'slide';
-  if (tagName === 'H1' || tagName === 'H2' || tagName === 'H3' || classes.includes('title')) return 'title';
-  if (tagName === 'IMG' || tagName === 'SVG' || classes.includes('image') || classes.includes('logo')) return 'image';
-  if (tagName === 'BUTTON' || tagName === 'A' && classes.includes('btn') || classes.includes('button')) return 'button';
   
-  if (tagName === 'P' || tagName === 'SPAN' || tagName === 'LI' || classes.includes('text') || classes.includes('desc')) {
-    return 'text';
+  // Navigation / Header
+  if (tagName === 'NAV' || roleAttr === 'navigation' || classes.includes('nav') || classes.includes('menu') || classes.includes('navbar') || id.includes('nav')) {
+    return 'navbar';
   }
   
-  if (classes.includes('card') || classes.includes('item') || classes.includes('box')) {
+  // Footer
+  if (tagName === 'FOOTER' || classes.includes('footer') || id.includes('footer')) {
+    return 'footer';
+  }
+
+  // Hero Section
+  if (classes.includes('hero') || classes.includes('banner') || classes.includes('jumbotron') || classes.includes('splash') || id.includes('hero')) {
+    return 'hero';
+  }
+
+  // CTA Section
+  if (classes.includes('cta') || classes.includes('call-to-action') || id.includes('cta')) {
+    return 'cta';
+  }
+
+  // Pricing
+  if (classes.includes('pricing') || classes.includes('pricing-table') || classes.includes('pricing-grid') || id.includes('pricing')) {
+    return 'pricing';
+  }
+
+  // FAQ Accordion
+  if (classes.includes('faq') || classes.includes('accordion') || classes.includes('questions') || id.includes('faq')) {
+    return 'faq';
+  }
+
+  // Testimonial
+  if (tagName === 'BLOCKQUOTE' || classes.includes('testimonial') || classes.includes('review') || classes.includes('quote') || id.includes('testimonial')) {
+    return 'testimonial';
+  }
+
+  // Tables
+  if (tagName === 'TABLE' || tagName === 'TBODY' || tagName === 'THEAD') {
+    return 'table';
+  }
+
+  // Forms
+  if (tagName === 'FORM' || classes.includes('form') || id.includes('form')) {
+    return 'form';
+  }
+
+  // Sections
+  if (tagName === 'SECTION' || classes.includes('section') || id.includes('section')) {
+    return 'section';
+  }
+
+  // Grids
+  if (classes.includes('grid') || classes.includes('metrics-grid') || classes.includes('feature-grid')) {
+    return 'grid';
+  }
+
+  // Titles
+  if (tagName.match(/^H[1-6]$/) || classes.includes('title') || classes.includes('heading') || classes.includes('headline')) {
+    return 'title';
+  }
+
+  // Images & SVGs
+  if (tagName === 'IMG' || tagName === 'SVG' || tagName === 'PICTURE' || classes.includes('image') || classes.includes('logo') || classes.includes('icon')) {
+    return 'image';
+  }
+
+  // Buttons
+  if (tagName === 'BUTTON' || (tagName === 'A' && (classes.includes('btn') || classes.includes('button')))) {
+    return 'button';
+  }
+
+  // Text
+  if (tagName === 'P' || tagName === 'SPAN' || tagName === 'LI' || tagName === 'A' || tagName === 'B' || tagName === 'STRONG' || tagName === 'EM' || tagName === 'SMALL') {
+    return 'text';
+  }
+
+  // Cards
+  if (classes.includes('card') || classes.includes('item') || classes.includes('box') || classes.includes('card-item')) {
     return 'card';
   }
 
-  if (classes.includes('grid') || classes.includes('flex') || classes.includes('container') || classes.includes('wrapper') || classes.includes('section')) {
+  // Generic Containers
+  if (tagName === 'DIV' || tagName === 'MAIN' || tagName === 'ARTICLE' || tagName === 'ASIDE' || tagName === 'HEADER' || classes.includes('container') || classes.includes('wrapper') || classes.includes('content') || classes.includes('inner')) {
     return 'container';
   }
 
   return 'unknown';
+}
+
+/**
+ * Contextual renaming heuristic to assign friendly human names
+ */
+function computeHumanName(
+  tag: string,
+  role: SemanticRole,
+  classes: string[],
+  parentRole?: SemanticRole,
+  userLabel?: string
+): string {
+  if (userLabel) return userLabel;
+
+  const tagLower = tag.toLowerCase();
+
+  // Contextual renaming rules
+  if (parentRole === 'hero') {
+    if (role === 'title') return 'Hero Headline (Título)';
+    if (role === 'text') return 'Hero Subtitle (Subtexto)';
+    if (role === 'button') return 'Hero CTA (Botão)';
+  }
+  if (parentRole === 'navbar') {
+    if (role === 'button') return 'Menu Button';
+    if (tagLower === 'a' || role === 'text') return 'Nav Link (Link Menu)';
+    if (role === 'image') return 'Navbar Logo';
+  }
+  if (parentRole === 'footer') {
+    if (tagLower === 'a' || role === 'text') return 'Footer Link';
+    if (role === 'image') return 'Footer Logo';
+  }
+  if (parentRole === 'card') {
+    if (role === 'title') return 'Card Title';
+    if (role === 'text') return 'Card Description';
+    if (role === 'image') return 'Card Thumbnail';
+    if (role === 'button') return 'Card Action';
+  }
+  if (parentRole === 'pricing') {
+    if (role === 'title') return 'Plan Name';
+    if (role === 'text') return 'Plan Feature';
+    if (role === 'button') return 'Select Plan Button';
+  }
+  if (parentRole === 'faq') {
+    if (role === 'title') return 'FAQ Question';
+    if (role === 'text') return 'FAQ Answer';
+  }
+  if (parentRole === 'testimonial') {
+    if (role === 'text') return 'Quote Text';
+    if (role === 'title') return 'Author Name';
+  }
+  if (parentRole === 'form') {
+    if (tagLower === 'input' || tagLower === 'textarea' || tagLower === 'select') return 'Form Input';
+    if (tagLower === 'label') return 'Form Label';
+    if (role === 'button') return 'Submit Button';
+  }
+
+  // Fallbacks based on role
+  if (role === 'hero') return 'Hero Section';
+  if (role === 'navbar') return 'Navigation Bar';
+  if (role === 'footer') return 'Footer Area';
+  if (role === 'pricing') return 'Pricing Section';
+  if (role === 'faq') return 'FAQ Accordion';
+  if (role === 'testimonial') return 'Testimonial Block';
+  if (role === 'cta') return 'CTA Callout';
+  if (role === 'card') return 'Metric Card';
+  if (role === 'grid') return 'Feature Grid';
+  if (role === 'form') return 'Form Group';
+  if (role === 'table') return 'Data Table';
+  
+  if (role === 'title') {
+    if (tagLower === 'h1') return 'Main Title (H1)';
+    if (tagLower === 'h2') return 'Section Title (H2)';
+    return `${tag.toUpperCase()} Title`;
+  }
+  if (role === 'image') return 'Image Asset';
+  if (role === 'button') return 'Button Action';
+  if (role === 'text') return 'Paragraph Text';
+  if (role === 'section') return 'Section Container';
+
+  // General fallback
+  const firstClass = classes.length > 0 ? `.${classes[0]}` : '';
+  return `${tagLower}${firstClass}`;
 }
 
 /**
@@ -129,11 +283,16 @@ function getElementXPath(element: Element): string {
 export function generateSemanticTree(rootElement: Element): SemanticElement[] {
   const tree: SemanticElement[] = [];
 
-  const traverse = (element: Element, parentList: SemanticElement[]) => {
+  const traverse = (
+    element: Element,
+    parentList: SemanticElement[],
+    parentRole?: SemanticRole,
+    parentHumanName?: string
+  ) => {
     const editorId = element.getAttribute('data-editor-id');
     if (!editorId) {
       // If no editor ID, just traverse children directly
-      Array.from(element.children).forEach(child => traverse(child, parentList));
+      Array.from(element.children).forEach(child => traverse(child, parentList, parentRole, parentHumanName));
       return;
     }
 
@@ -163,10 +322,15 @@ export function generateSemanticTree(rootElement: Element): SemanticElement[] {
       }
     });
 
+    const userLabel = element.getAttribute('data-editor-label') || undefined;
+    const role = getSemanticRole(element);
+    const humanName = computeHumanName(element.tagName, role, Array.from(element.classList), parentRole, userLabel);
+
     const node: SemanticElement = {
       id: editorId,
       tagName: element.tagName,
-      role: getSemanticRole(element),
+      role,
+      humanName,
       text,
       classes: Array.from(element.classList),
       style: inlineStyle,
@@ -175,11 +339,12 @@ export function generateSemanticTree(rootElement: Element): SemanticElement[] {
       xpath: getElementXPath(element),
       isLocked: element.getAttribute('data-editor-locked') === 'true',
       isHidden: element.getAttribute('data-editor-hidden') === 'true',
-      label: element.getAttribute('data-editor-label') || undefined
+      label: userLabel,
+      outerHTML: element.outerHTML
     };
 
     parentList.push(node);
-    Array.from(element.children).forEach(child => traverse(child, node.children));
+    Array.from(element.children).forEach(child => traverse(child, node.children, role, humanName));
   };
 
   traverse(rootElement, tree);

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Sparkles, Key, Send, Loader2, RotateCcw, Check, X, ShieldAlert } from 'lucide-react';
+import { Sparkles, Key, Send, Loader2, RotateCcw, Check, X, ShieldAlert, Eye } from 'lucide-react';
 
 interface AIPanelProps {
   onSendPrompt: (prompt: string) => Promise<void>;
@@ -18,6 +18,7 @@ interface AIPanelProps {
   } | null;
   onApplyChanges: () => void;
   onCancelChanges: () => void;
+  onShowDetails?: () => void;
 }
 
 export function AIPanel({
@@ -31,7 +32,8 @@ export function AIPanel({
   
   pendingChanges,
   onApplyChanges,
-  onCancelChanges
+  onCancelChanges,
+  onShowDetails
 }: AIPanelProps) {
   const [prompt, setPrompt] = useState('');
   const [showKeyInput, setShowKeyInput] = useState(false);
@@ -49,7 +51,7 @@ export function AIPanel({
   };
 
   return (
-    <div className="absolute bottom-6 left-1/2 -translate-x-1/2 w-[640px] max-w-[90vw] bg-slate-900/90 backdrop-blur-md border border-slate-800 rounded-xl shadow-2xl z-30 select-none overflow-hidden transition-all duration-300">
+    <div className="absolute bottom-6 left-1/2 -translate-x-1/2 w-[640px] max-w-[90vw] bg-slate-900/90 backdrop-blur-md border border-slate-800 rounded-xl shadow-2xl z-30 select-none overflow-hidden transition-all duration-300 animate-slide-up">
       
       {/* 1. DIFF REVIEW EXPANDABLE PANEL (If there are pending mutations) */}
       {pendingChanges && (
@@ -78,17 +80,26 @@ export function AIPanel({
             <div className="flex gap-2">
               <button
                 onClick={onCancelChanges}
-                className="flex items-center gap-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 px-3 py-1.5 rounded-lg cursor-pointer transition-colors"
+                className="flex items-center gap-1 text-xs bg-slate-805 border border-slate-800 hover:bg-slate-800 hover:text-white text-slate-300 px-3 py-1.5 rounded-lg cursor-pointer transition-colors"
               >
                 <X className="w-3.5 h-3.5" />
                 Descartar
               </button>
+              {onShowDetails && (
+                <button
+                  onClick={onShowDetails}
+                  className="flex items-center gap-1 text-xs bg-slate-800 border border-slate-700 hover:bg-slate-700 text-slate-200 px-3 py-1.5 rounded-lg cursor-pointer transition-colors"
+                >
+                  <Eye className="w-3.5 h-3.5 text-blue-400" />
+                  Ver Detalhes
+                </button>
+              )}
               <button
                 onClick={onApplyChanges}
                 className="flex items-center gap-1 text-xs bg-blue-600 hover:bg-blue-500 text-white px-4 py-1.5 rounded-lg font-bold cursor-pointer transition-colors shadow-md shadow-blue-600/20"
               >
                 <Check className="w-3.5 h-3.5" />
-                Aplicar Alterações
+                Aplicar
               </button>
             </div>
           </div>

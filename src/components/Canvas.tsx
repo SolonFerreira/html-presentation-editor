@@ -1,6 +1,7 @@
-import { useRef, useEffect, useState } from 'react';
+import { useRef, useEffect, useState, useMemo } from 'react';
 import { Layout } from 'lucide-react';
 import { SelectionOverlay } from './SelectionOverlay';
+import { ContextualHUD } from './ContextualHUD';
 import type { ViewportMode } from '../types';
 
 interface Rect {
@@ -21,7 +22,18 @@ interface CanvasProps {
   onUpdateText: (elementId: string, text: string) => void;
   onDeleteElement: (elementId: string) => void;
   onQuickFontChange: (elementId: string, dir: 'up' | 'down') => void;
+  onUpdateStyles?: (elementId: string, styles: Record<string, string>) => void;
   
+  // Structural actions
+  onUnwrapElement?: (id: string) => void;
+  onWrapElement?: (id: string, tag: 'div' | 'section') => void;
+  onChangeElementTag?: (id: string, newTag: string) => void;
+  onClearElementStyles?: (id: string) => void;
+  onDuplicateElement?: (id: string) => void;
+  onReorderElement?: (id: string, direction: 'up' | 'down') => void;
+  onMoveElementOut?: (id: string) => void;
+  onGroupElement?: (id: string) => void;
+
   // Canvas attributes
   zoomScale: number;
   onZoomChange?: (scale: number) => void;
@@ -38,6 +50,15 @@ export function Canvas({
   onUpdateText,
   onDeleteElement,
   onQuickFontChange,
+  onUpdateStyles,
+  onUnwrapElement,
+  onWrapElement,
+  onChangeElementTag,
+  onClearElementStyles,
+  onDuplicateElement,
+  onReorderElement,
+  onMoveElementOut,
+  onGroupElement,
   
   zoomScale,
   onZoomChange,
@@ -69,6 +90,21 @@ export function Canvas({
   const [spacePressed, setSpacePressed] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0, scrollLeft: 0, scrollTop: 0 });
+
+  // Resizing State
+  const [isResizing, setIsResizing] = useState(false);
+  const [resizeStart, setResizeStart] = useState<{
+    handle: string;
+    startX: number;
+    startY: number;
+    startWidth: number;
+    startHeight: number;
+    startPaddingTop: number;
+    startPaddingBottom: number;
+    startPaddingLeft: number;
+    startPaddingRight: number;
+    isContainer: boolean;
+  } | null>(null);
 
   // Listen to Spacebar press for pan mode
   useEffect(() => {
@@ -126,6 +162,145 @@ export function Canvas({
   const handleMouseUp = () => {
     setIsDragging(false);
   };
+
+  // Resize Handlers
+  const handleResizeStart = (handle: string, startEvent: React.MouseEvent) => {
+    if (!selectedElementId || !iframeRef.current) return;
+    const iframe = iframeRef.current;
+    const iframeDoc = iframe.contentDocument;
+    if (!iframeDoc) return;
+
+    const el = iframeDoc.querySelector(`[data-editor-id="${selectedElementId}"]`) as HTMLElement;
+    if (!el) return;
+
+    const clientRect = el.getBoundingClientRect();
+    const computedStyle = el.ownerDocument.defaultView?.getComputedStyle(el) || window.getComputedStyle(el);
+    const paddingTop = parseFloat(computedStyle.paddingTop) || 0;
+    const paddingBottom = parseFloat(computedStyle.paddingBottom) || 0;
+    const paddingLeft = parseFloat(computedStyle.paddingLeft) || 0;
+    const paddingRight = parseFloat(computedStyle.paddingRight) || 0;
+
+    const isContainer = ['DIV', 'SECTION', 'ARTICLE', 'HEADER', 'FOOTER', 'NAV', 'MAIN'].includes(el.tagName);
+
+    setIsResizing(true);
+    setResizeStart({
+      handle,
+      startX: startEvent.clientX,
+      startY: startEvent.clientY,
+      startWidth: clientRect.width,
+      startHeight: clientRect.height,
+      startPaddingTop: paddingTop,
+      startPaddingBottom: paddingBottom,
+      startPaddingLeft: paddingLeft,
+      startPaddingRight: paddingRight,
+      isContainer
+    });
+  };
+
+  useEffect(() => {
+    if (!isResizing || !resizeStart || !selectedElementId || !iframeRef.current) return;
+
+    const iframe = iframeRef.current;
+    const iframeDoc = iframe.contentDocument;
+    if (!iframeDoc) return;
+
+    const el = iframeDoc.querySelector(`[data-editor-id="${selectedElementId}"]`) as HTMLElement;
+    if (!el) return;
+
+    const handleMouseMoveWindow = (e: MouseEvent) => {
+      const dx = e.clientX - resizeStart.startX;
+      const dy = e.clientY - resizeStart.startY;
+      const deltaX = dx / zoomScale;
+      const deltaY = dy / zoomScale;
+
+      const handle = resizeStart.handle;
+
+      if (resizeStart.isContainer) {
+        let newPaddingTop = resizeStart.startPaddingTop;
+        let newPaddingBottom = resizeStart.startPaddingBottom;
+        let newPaddingLeft = resizeStart.startPaddingLeft;
+        let newPaddingRight = resizeStart.startPaddingRight;
+
+        if (handle.includes('right')) {
+          newPaddingRight = resizeStart.startPaddingRight + deltaX;
+        } else if (handle.includes('left')) {
+          newPaddingLeft = resizeStart.startPaddingLeft - deltaX;
+        }
+
+        if (handle.includes('bottom')) {
+          newPaddingBottom = resizeStart.startPaddingBottom + deltaY;
+        } else if (handle.includes('top')) {
+          newPaddingTop = resizeStart.startPaddingTop - deltaY;
+        }
+
+        newPaddingTop = Math.max(0, newPaddingTop);
+        newPaddingBottom = Math.max(0, newPaddingBottom);
+        newPaddingLeft = Math.max(0, newPaddingLeft);
+        newPaddingRight = Math.max(0, newPaddingRight);
+
+        el.style.paddingTop = `${Math.round(newPaddingTop)}px`;
+        el.style.paddingBottom = `${Math.round(newPaddingBottom)}px`;
+        el.style.paddingLeft = `${Math.round(newPaddingLeft)}px`;
+        el.style.paddingRight = `${Math.round(newPaddingRight)}px`;
+      } else {
+        let newWidth = resizeStart.startWidth;
+        let newHeight = resizeStart.startHeight;
+
+        if (handle.includes('right')) {
+          newWidth = resizeStart.startWidth + deltaX;
+        } else if (handle.includes('left')) {
+          newWidth = resizeStart.startWidth - deltaX;
+        }
+
+        if (handle.includes('bottom')) {
+          newHeight = resizeStart.startHeight + deltaY;
+        } else if (handle.includes('top')) {
+          newHeight = resizeStart.startHeight - deltaY;
+        }
+
+        newWidth = Math.max(10, newWidth);
+        newHeight = Math.max(10, newHeight);
+
+        el.style.width = `${Math.round(newWidth)}px`;
+        el.style.height = `${Math.round(newHeight)}px`;
+      }
+
+      updateElementRects();
+    };
+
+    const handleMouseUpWindow = () => {
+      setIsResizing(false);
+      setResizeStart(null);
+
+      if (onUpdateStyles) {
+        if (resizeStart.isContainer) {
+          onUpdateStyles(selectedElementId, {
+            paddingTop: el.style.paddingTop,
+            paddingBottom: el.style.paddingBottom,
+            paddingLeft: el.style.paddingLeft,
+            paddingRight: el.style.paddingRight
+          });
+        } else {
+          onUpdateStyles(selectedElementId, {
+            width: el.style.width,
+            height: el.style.height
+          });
+        }
+      }
+    };
+
+    window.addEventListener('mousemove', handleMouseMoveWindow);
+    window.addEventListener('mouseup', handleMouseUpWindow);
+    iframeDoc.addEventListener('mousemove', handleMouseMoveWindow);
+    iframeDoc.addEventListener('mouseup', handleMouseUpWindow);
+
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMoveWindow);
+      window.removeEventListener('mouseup', handleMouseUpWindow);
+      iframeDoc.removeEventListener('mousemove', handleMouseMoveWindow);
+      iframeDoc.removeEventListener('mouseup', handleMouseUpWindow);
+    };
+  }, [isResizing, resizeStart, selectedElementId, zoomScale, onUpdateStyles]);
 
   // Zoom on wheel (Ctrl + Wheel)
   useEffect(() => {
@@ -448,6 +623,48 @@ export function Canvas({
     );
   }
 
+  const selectedElementData = useMemo(() => {
+    if (!selectedElementId || !iframeRef.current) return null;
+    const iframe = iframeRef.current;
+    const iframeDoc = iframe.contentDocument;
+    if (!iframeDoc) return null;
+
+    const el = iframeDoc.querySelector(`[data-editor-id="${selectedElementId}"]`) as HTMLElement;
+    if (!el) return null;
+
+    const styleRecord: Record<string, string> = {};
+    for (let i = 0; i < el.style.length; i++) {
+      const key = el.style[i];
+      styleRecord[key] = el.style.getPropertyValue(key);
+    }
+    
+    const computedStyle = el.ownerDocument?.defaultView?.getComputedStyle(el);
+    if (computedStyle) {
+      if (!styleRecord.color && computedStyle.color) styleRecord.color = computedStyle.color;
+      if (!styleRecord.backgroundColor && computedStyle.backgroundColor) styleRecord.backgroundColor = computedStyle.backgroundColor;
+      if (!styleRecord.fontSize && computedStyle.fontSize) styleRecord.fontSize = computedStyle.fontSize;
+      if (!styleRecord.textAlign && computedStyle.textAlign) styleRecord.textAlign = computedStyle.textAlign;
+      if (!styleRecord.display && computedStyle.display) styleRecord.display = computedStyle.display;
+      if (!styleRecord.flexDirection && computedStyle.flexDirection) styleRecord.flexDirection = computedStyle.flexDirection;
+      if (!styleRecord.padding && computedStyle.padding) styleRecord.padding = computedStyle.padding;
+    }
+
+    const attributesRecord: Record<string, string> = {};
+    for (const attr of Array.from(el.attributes)) {
+      attributesRecord[attr.name] = attr.value;
+    }
+
+    const hasParent = el.parentElement !== null && el.parentElement.tagName !== 'BODY';
+
+    return {
+      tagName: el.tagName,
+      style: styleRecord,
+      attributes: attributesRecord,
+      text: el.textContent || '',
+      hasParent
+    };
+  }, [selectedElementId, htmlContent]);
+
   const cursorClass = spacePressed ? (isDragging ? 'cursor-grabbing' : 'cursor-grab') : 'cursor-default';
 
   return (
@@ -520,8 +737,46 @@ export function Canvas({
               selectedTag={selectedTag}
               hoveredTag={hoveredTag}
               quickAction={handleQuickAction}
+              onResizeStart={handleResizeStart}
             />
           )}
+
+          {selectedRect && selectedElementData && (() => {
+            const isHUDAbove = selectedRect.top - 50 > 0;
+            const topPos = isHUDAbove 
+              ? selectedRect.top - 8 
+              : selectedRect.top + selectedRect.height + 8;
+            const transformVal = isHUDAbove 
+              ? 'translate(-50%, -100%)' 
+              : 'translate(-50%, 0)';
+            return (
+              <div
+                className="absolute pointer-events-auto z-40"
+                style={{
+                  left: `${selectedRect.left + selectedRect.width / 2}px`,
+                  top: `${topPos}px`,
+                  transform: transformVal,
+                }}
+              >
+                <ContextualHUD
+                  tagName={selectedElementData.tagName}
+                  style={selectedElementData.style}
+                  attributes={selectedElementData.attributes}
+                  onUpdateStyles={(styles) => onUpdateStyles?.(selectedElementId!, styles)}
+                  onUnwrap={() => onUnwrapElement?.(selectedElementId!)}
+                  onWrap={(tag) => onWrapElement?.(selectedElementId!, tag)}
+                  onChangeTag={(tag) => onChangeElementTag?.(selectedElementId!, tag)}
+                  onClearStyles={() => onClearElementStyles?.(selectedElementId!)}
+                  onDuplicate={() => onDuplicateElement?.(selectedElementId!)}
+                  onDelete={() => onDeleteElement(selectedElementId!)}
+                  onMove={(dir) => onReorderElement?.(selectedElementId!, dir)}
+                  onMoveOut={() => onMoveElementOut?.(selectedElementId!)}
+                  onGroup={() => onGroupElement?.(selectedElementId!)}
+                  hasParent={selectedElementData.hasParent}
+                />
+              </div>
+            );
+          })()}
         </div>
       </div>
     </div>

@@ -15,6 +15,7 @@ interface SelectionOverlayProps {
   selectedTag: string | null;
   hoveredTag: string | null;
   quickAction?: (action: string) => void;
+  onResizeStart?: (handle: string, startEvent: React.MouseEvent) => void;
 }
 
 export function SelectionOverlay({
@@ -22,7 +23,8 @@ export function SelectionOverlay({
   hoveredRect,
   selectedTag,
   hoveredTag,
-  quickAction
+  quickAction,
+  onResizeStart
 }: SelectionOverlayProps) {
   const [altPressed, setAltPressed] = useState(false);
 
@@ -195,15 +197,39 @@ export function SelectionOverlay({
           </div>
 
           {/* Discreet Figma Bounding Box Handles */}
-          <div className="absolute w-1.5 h-1.5 bg-white border border-blue-600 rounded-sm -top-[3.5px] -left-[3.5px] pointer-events-auto cursor-nwse-resize" />
-          <div className="absolute w-1.5 h-1.5 bg-white border border-blue-600 rounded-sm -top-[3.5px] -right-[3.5px] pointer-events-auto cursor-nesw-resize" />
-          <div className="absolute w-1.5 h-1.5 bg-white border border-blue-600 rounded-sm -bottom-[3.5px] -left-[3.5px] pointer-events-auto cursor-nesw-resize" />
-          <div className="absolute w-1.5 h-1.5 bg-white border border-blue-600 rounded-sm -bottom-[3.5px] -right-[3.5px] pointer-events-auto cursor-nwse-resize" />
+          <div 
+            className="absolute w-1.5 h-1.5 bg-white border border-blue-600 rounded-sm -top-[3.5px] -left-[3.5px] pointer-events-auto cursor-nwse-resize" 
+            onMouseDown={(e) => { e.stopPropagation(); e.preventDefault(); onResizeStart?.('top-left', e); }}
+          />
+          <div 
+            className="absolute w-1.5 h-1.5 bg-white border border-blue-600 rounded-sm -top-[3.5px] -right-[3.5px] pointer-events-auto cursor-nesw-resize" 
+            onMouseDown={(e) => { e.stopPropagation(); e.preventDefault(); onResizeStart?.('top-right', e); }}
+          />
+          <div 
+            className="absolute w-1.5 h-1.5 bg-white border border-blue-600 rounded-sm -bottom-[3.5px] -left-[3.5px] pointer-events-auto cursor-nesw-resize" 
+            onMouseDown={(e) => { e.stopPropagation(); e.preventDefault(); onResizeStart?.('bottom-left', e); }}
+          />
+          <div 
+            className="absolute w-1.5 h-1.5 bg-white border border-blue-600 rounded-sm -bottom-[3.5px] -right-[3.5px] pointer-events-auto cursor-nwse-resize" 
+            onMouseDown={(e) => { e.stopPropagation(); e.preventDefault(); onResizeStart?.('bottom-right', e); }}
+          />
           
-          <div className="absolute w-1.5 h-1.5 bg-white border border-blue-600 rounded-sm top-1/2 -left-[3.5px] -translate-y-1/2 pointer-events-auto cursor-ew-resize" />
-          <div className="absolute w-1.5 h-1.5 bg-white border border-blue-600 rounded-sm top-1/2 -right-[3.5px] -translate-y-1/2 pointer-events-auto cursor-ew-resize" />
-          <div className="absolute w-1.5 h-1.5 bg-white border border-blue-600 rounded-sm -top-[3.5px] left-1/2 -translate-x-1/2 pointer-events-auto cursor-ns-resize" />
-          <div className="absolute w-1.5 h-1.5 bg-white border border-blue-600 rounded-sm -bottom-[3.5px] left-1/2 -translate-x-1/2 pointer-events-auto cursor-ns-resize" />
+          <div 
+            className="absolute w-1.5 h-1.5 bg-white border border-blue-600 rounded-sm top-1/2 -left-[3.5px] -translate-y-1/2 pointer-events-auto cursor-ew-resize" 
+            onMouseDown={(e) => { e.stopPropagation(); e.preventDefault(); onResizeStart?.('left', e); }}
+          />
+          <div 
+            className="absolute w-1.5 h-1.5 bg-white border border-blue-600 rounded-sm top-1/2 -right-[3.5px] -translate-y-1/2 pointer-events-auto cursor-ew-resize" 
+            onMouseDown={(e) => { e.stopPropagation(); e.preventDefault(); onResizeStart?.('right', e); }}
+          />
+          <div 
+            className="absolute w-1.5 h-1.5 bg-white border border-blue-600 rounded-sm -top-[3.5px] left-1/2 -translate-x-1/2 pointer-events-auto cursor-ns-resize" 
+            onMouseDown={(e) => { e.stopPropagation(); e.preventDefault(); onResizeStart?.('top', e); }}
+          />
+          <div 
+            className="absolute w-1.5 h-1.5 bg-white border border-blue-600 rounded-sm -bottom-[3.5px] left-1/2 -translate-x-1/2 pointer-events-auto cursor-ns-resize" 
+            onMouseDown={(e) => { e.stopPropagation(); e.preventDefault(); onResizeStart?.('bottom', e); }}
+          />
 
           {/* Quick Action Floating Toolbar */}
           <div className="absolute right-0 top-0 -translate-y-full flex gap-1 pointer-events-auto pb-1 z-30">
