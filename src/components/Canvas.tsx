@@ -33,6 +33,7 @@ interface CanvasProps {
   onReorderElement?: (id: string, direction: 'up' | 'down') => void;
   onMoveElementOut?: (id: string) => void;
   onGroupElement?: (id: string) => void;
+  onInsertComponent?: (elementId: string | null, componentType: string) => void;
 
   // Canvas attributes
   zoomScale: number;
@@ -59,6 +60,7 @@ export function Canvas({
   onReorderElement,
   onMoveElementOut,
   onGroupElement,
+  onInsertComponent,
   
   zoomScale,
   onZoomChange,
@@ -105,6 +107,16 @@ export function Canvas({
     startPaddingRight: number;
     isContainer: boolean;
   } | null>(null);
+
+  // Viewport resize state
+  const [customViewportWidth, setCustomViewportWidth] = useState<number | null>(null);
+  const [isResizingViewport, setIsResizingViewport] = useState(false);
+  const viewportResizeStartRef = useRef<{ startX: number; startWidth: number }>({ startX: 0, startWidth: 0 });
+
+  // Reset custom width when viewport mode changes
+  useEffect(() => {
+    setCustomViewportWidth(null);
+  }, [viewportMode]);
 
   // Listen to Spacebar press for pan mode
   useEffect(() => {
@@ -196,6 +208,55 @@ export function Canvas({
       isContainer
     });
   };
+
+  const handleViewportResizeStart = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    const currentW = customViewportWidth !== null 
+      ? customViewportWidth 
+      : parseInt(getViewportDimensions().width, 10);
+
+    viewportResizeStartRef.current = {
+      startX: e.clientX,
+      startWidth: currentW
+    };
+    setIsResizingViewport(true);
+  };
+
+  useEffect(() => {
+    if (!isResizingViewport) return;
+
+    const handleMouseMoveWindow = (e: MouseEvent) => {
+      const dx = e.clientX - viewportResizeStartRef.current.startX;
+      const deltaX = dx / zoomScale;
+      const newWidth = Math.max(320, Math.min(2000, viewportResizeStartRef.current.startWidth + deltaX * 2));
+      setCustomViewportWidth(Math.round(newWidth));
+    };
+
+    const handleMouseUpWindow = () => {
+      setIsResizingViewport(false);
+    };
+
+    window.addEventListener('mousemove', handleMouseMoveWindow);
+    window.addEventListener('mouseup', handleMouseUpWindow);
+    
+    const iframe = iframeRef.current;
+    const iframeDoc = iframe?.contentDocument;
+    if (iframeDoc) {
+      iframeDoc.addEventListener('mousemove', handleMouseMoveWindow);
+      iframeDoc.addEventListener('mouseup', handleMouseUpWindow);
+    }
+
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMoveWindow);
+      window.removeEventListener('mouseup', handleMouseUpWindow);
+      if (iframeDoc) {
+        iframeDoc.removeEventListener('mousemove', handleMouseMoveWindow);
+        iframeDoc.removeEventListener('mouseup', handleMouseUpWindow);
+      }
+    };
+  }, [isResizingViewport, zoomScale]);
 
   useEffect(() => {
     if (!isResizing || !resizeStart || !selectedElementId || !iframeRef.current) return;
@@ -601,7 +662,8 @@ export function Canvas({
     }
   };
 
-  const { width, height } = getViewportDimensions();
+  const { width: defaultWidth, height } = getViewportDimensions();
+  const width = customViewportWidth !== null ? `${customViewportWidth}px` : defaultWidth;
 
   if (presentationMode) {
     return (
@@ -688,6 +750,24 @@ export function Canvas({
           className="relative bg-white shadow-premium border border-slate-900 rounded-lg overflow-hidden animate-scale-in"
           style={{ width, height }}
         >
+          {/* Viewport Dimension Badge */}
+          {customViewportWidth !== null && (
+            <div className="absolute top-3 left-1/2 -translate-x-1/2 bg-slate-900/90 text-blue-400 border border-slate-800 rounded px-2 py-0.5 font-mono text-[10px] font-bold z-50 pointer-events-none shadow-md">
+              {customViewportWidth}px
+            </div>
+          )}
+
+          {/* Viewport Resize Handle */}
+          {htmlContent && (
+            <div 
+              onMouseDown={handleViewportResizeStart}
+              className="absolute right-0 top-0 bottom-0 w-2.5 hover:w-3 hover:bg-blue-600/40 cursor-col-resize z-50 transition-all flex items-center justify-center border-l border-slate-200/10 group"
+              title="Arrastar para Redimensionar Viewport"
+            >
+              <div className="w-1 h-8 bg-slate-400/40 rounded-full group-hover:bg-blue-300" />
+            </div>
+          )}
+
           {htmlContent ? (
             <iframe
               ref={iframeRef}
@@ -772,6 +852,7 @@ export function Canvas({
                   onMove={(dir) => onReorderElement?.(selectedElementId!, dir)}
                   onMoveOut={() => onMoveElementOut?.(selectedElementId!)}
                   onGroup={() => onGroupElement?.(selectedElementId!)}
+                  onInsertComponent={(type) => onInsertComponent?.(selectedElementId!, type)}
                   hasParent={selectedElementData.hasParent}
                 />
               </div>

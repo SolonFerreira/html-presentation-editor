@@ -16,7 +16,11 @@ import {
   ChevronDown,
   Settings,
   Palette,
-  Image as ImageIcon
+  Image as ImageIcon,
+  LayoutGrid,
+  Plus,
+  Component,
+  Hash
 } from 'lucide-react';
 
 interface ContextualHUDProps {
@@ -34,6 +38,7 @@ interface ContextualHUDProps {
   onMoveOut: () => void;
   onGroup: () => void;
   hasParent: boolean;
+  onInsertComponent?: (type: string) => void;
 }
 
 export function ContextualHUD({
@@ -50,13 +55,19 @@ export function ContextualHUD({
   onMove,
   onMoveOut,
   onGroup,
-  hasParent
+  hasParent,
+  onInsertComponent
 }: ContextualHUDProps) {
   const [showTagMenu, setShowTagMenu] = useState(false);
   const [showActionsMenu, setShowActionsMenu] = useState(false);
+  const [showLayoutDetails, setShowLayoutDetails] = useState(false);
+  const [showInsertMenu, setShowInsertMenu] = useState(false);
+  const [showClassesDetails, setShowClassesDetails] = useState(false);
+  const [newClassName, setNewClassName] = useState('');
   
   const tagMenuRef = useRef<HTMLDivElement>(null);
   const actionsMenuRef = useRef<HTMLDivElement>(null);
+  const insertMenuRef = useRef<HTMLDivElement>(null);
 
   // Close menus on click outside
   useEffect(() => {
@@ -68,10 +79,13 @@ export function ContextualHUD({
       if (showActionsMenu && actionsMenuRef.current && !actionsMenuRef.current.contains(target)) {
         setShowActionsMenu(false);
       }
+      if (showInsertMenu && insertMenuRef.current && !insertMenuRef.current.contains(target)) {
+        setShowInsertMenu(false);
+      }
     };
     window.addEventListener('click', handleOutsideClick);
     return () => window.removeEventListener('click', handleOutsideClick);
-  }, [showTagMenu, showActionsMenu]);
+  }, [showTagMenu, showActionsMenu, showInsertMenu]);
 
   const tagLower = tagName.toLowerCase();
   const isText = ['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'span', 'a', 'li'].includes(tagLower);
@@ -106,7 +120,9 @@ export function ContextualHUD({
   const commonTagOptions = ['div', 'section', 'h1', 'h2', 'h3', 'p', 'button', 'a'];
 
   return (
-    <div className="flex items-center bg-slate-900/95 backdrop-blur border border-slate-800 rounded-lg shadow-premium p-1 gap-1 text-slate-300 font-sans text-xs select-none">
+    <div className="flex flex-col bg-slate-900/95 backdrop-blur border border-slate-800 rounded-lg shadow-premium p-1 text-slate-300 font-sans text-xs select-none max-w-xl animate-scale-in">
+      {/* Row 1: main controls */}
+      <div className="flex items-center gap-1">
       
       {/* 1. TAG DISPLAY & SELECTOR */}
       <div className="relative" ref={tagMenuRef}>
@@ -288,27 +304,93 @@ export function ContextualHUD({
 
           <div className="w-px h-5 bg-slate-800/80 mx-0.5" />
 
-          {/* Display fast switches */}
+          {/* Layout details toggle */}
           <button
-            onClick={() => onUpdateStyles({ display: 'flex', flexDirection: 'column' })}
-            className={`px-1.5 py-0.5 text-[9px] font-mono rounded hover:bg-slate-850 cursor-pointer ${
-              style.display === 'flex' && style.flexDirection === 'column' ? 'text-blue-400 bg-slate-800/50' : 'text-slate-500'
+            onClick={() => setShowLayoutDetails(!showLayoutDetails)}
+            className={`flex items-center gap-1 px-1.5 py-0.5 rounded hover:bg-slate-800 cursor-pointer ${
+              showLayoutDetails ? 'text-blue-400 bg-slate-800 font-bold' : 'text-slate-400'
             }`}
-            title="Empilhamento Vertical (Flex Col)"
+            title="Ajustar Alinhamento e Layout"
           >
-            Col
-          </button>
-          <button
-            onClick={() => onUpdateStyles({ display: 'flex', flexDirection: 'row' })}
-            className={`px-1.5 py-0.5 text-[9px] font-mono rounded hover:bg-slate-850 cursor-pointer ${
-              style.display === 'flex' && (style.flexDirection === 'row' || !style.flexDirection) ? 'text-blue-400 bg-slate-800/50' : 'text-slate-500'
-            }`}
-            title="Lado a Lado (Flex Row)"
-          >
-            Row
+            <LayoutGrid className="w-3.5 h-3.5" />
+            <span className="text-[10px]">Layout</span>
           </button>
         </div>
       )}
+
+      <div className="w-px h-5 bg-slate-800/80 mx-0.5" />
+
+      {/* 4.2. INSERIR COMPONENTE DROPDOWN */}
+      {onInsertComponent && (
+        <div className="relative" ref={insertMenuRef}>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setShowInsertMenu(!showInsertMenu);
+            }}
+            className="p-1 rounded hover:bg-slate-800 text-slate-400 hover:text-white cursor-pointer flex items-center gap-0.5"
+            title="Inserir Componente"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            <ChevronDown className="w-2.5 h-2.5 text-slate-500" />
+          </button>
+
+          {showInsertMenu && (
+            <div className="absolute left-0 bottom-full mb-1.5 bg-slate-900 border border-slate-800 rounded-lg p-1.5 shadow-2xl z-50 w-44 flex flex-col gap-0.5 animate-scale-in">
+              <span className="px-2 py-0.5 text-[8px] text-slate-500 font-bold uppercase tracking-wider border-b border-slate-800/80 mb-1">
+                Inserir Seção
+              </span>
+              
+              <button
+                onClick={() => { onInsertComponent('hero'); setShowInsertMenu(false); }}
+                className="text-left px-2 py-1.5 rounded text-xs hover:bg-slate-800 text-slate-300 flex items-center gap-2 cursor-pointer"
+              >
+                <Component className="w-3 h-3 text-blue-400" /> Hero Section
+              </button>
+              
+              <button
+                onClick={() => { onInsertComponent('features'); setShowInsertMenu(false); }}
+                className="text-left px-2 py-1.5 rounded text-xs hover:bg-slate-800 text-slate-300 flex items-center gap-2 cursor-pointer"
+              >
+                <Component className="w-3 h-3 text-emerald-400" /> Features Grid
+              </button>
+
+              <button
+                onClick={() => { onInsertComponent('pricing'); setShowInsertMenu(false); }}
+                className="text-left px-2 py-1.5 rounded text-xs hover:bg-slate-800 text-slate-300 flex items-center gap-2 cursor-pointer"
+              >
+                <Component className="w-3 h-3 text-indigo-400" /> Pricing Table
+              </button>
+
+              <button
+                onClick={() => { onInsertComponent('testimonials'); setShowInsertMenu(false); }}
+                className="text-left px-2 py-1.5 rounded text-xs hover:bg-slate-800 text-slate-300 flex items-center gap-2 cursor-pointer"
+              >
+                <Component className="w-3 h-3 text-purple-400" /> Depoimentos
+              </button>
+
+              <button
+                onClick={() => { onInsertComponent('footer'); setShowInsertMenu(false); }}
+                className="text-left px-2 py-1.5 rounded text-xs hover:bg-slate-800 text-slate-300 flex items-center gap-2 cursor-pointer"
+              >
+                <Component className="w-3 h-3 text-slate-400" /> Footer Moderno
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Classes toggle button */}
+      <button
+        onClick={() => setShowClassesDetails(!showClassesDetails)}
+        className={`flex items-center gap-1 px-1.5 py-0.5 rounded hover:bg-slate-800 cursor-pointer ${
+          showClassesDetails ? 'text-blue-400 bg-slate-800 font-bold' : 'text-slate-400'
+        }`}
+        title="Editar Classes CSS"
+      >
+        <Hash className="w-3.5 h-3.5" />
+        <span className="text-[10px]">Classes</span>
+      </button>
 
       <div className="w-px h-5 bg-slate-800/80 mx-0.5" />
 
@@ -409,6 +491,298 @@ export function ContextualHUD({
         )}
       </div>
 
+      </div>
+
+      {/* Row 2: Layout details */}
+      {isContainer && showLayoutDetails && (
+        <div className="flex items-center gap-2 mt-1.5 bg-slate-950/80 border-t border-slate-800/80 pt-2 px-1.5 pb-1 rounded-b flex-wrap">
+          {/* Display Mode */}
+          <div className="flex items-center bg-slate-900 border border-slate-800 rounded p-0.5 gap-0.5">
+            <button
+              onClick={() => onUpdateStyles({ display: 'flex', flexDirection: 'row' })}
+              className={`px-1.5 py-0.5 rounded text-[10px] font-medium cursor-pointer ${
+                style.display === 'flex' && (style.flexDirection === 'row' || !style.flexDirection)
+                  ? 'bg-blue-600 text-white font-bold'
+                  : 'text-slate-400 hover:bg-slate-800'
+              }`}
+              title="Flex Row (Lado a Lado)"
+            >
+              Row
+            </button>
+            <button
+              onClick={() => onUpdateStyles({ display: 'flex', flexDirection: 'column' })}
+              className={`px-1.5 py-0.5 rounded text-[10px] font-medium cursor-pointer ${
+                style.display === 'flex' && style.flexDirection === 'column'
+                  ? 'bg-blue-600 text-white font-bold'
+                  : 'text-slate-400 hover:bg-slate-800'
+              }`}
+              title="Flex Col (Empilhado)"
+            >
+              Col
+            </button>
+            <button
+              onClick={() => onUpdateStyles({ display: 'grid', gridTemplateColumns: style.gridTemplateColumns || 'repeat(2, minmax(0, 1fr))' })}
+              className={`px-1.5 py-0.5 rounded text-[10px] font-medium cursor-pointer ${
+                style.display === 'grid'
+                  ? 'bg-blue-600 text-white font-bold'
+                  : 'text-slate-400 hover:bg-slate-800'
+              }`}
+              title="Grid Layout"
+            >
+              Grid
+            </button>
+            <button
+              onClick={() => onUpdateStyles({ display: 'block', flexDirection: '', gridTemplateColumns: '' })}
+              className={`px-1.5 py-0.5 rounded text-[10px] font-medium cursor-pointer ${
+                !style.display || style.display === 'block'
+                  ? 'bg-blue-600 text-white font-bold'
+                  : 'text-slate-400 hover:bg-slate-800'
+              }`}
+              title="Block Layout (Padrão)"
+            >
+              Block
+            </button>
+          </div>
+
+          {(style.display === 'flex' || style.display === 'grid') && (
+            <>
+              <div className="w-px h-4 bg-slate-800/80 mx-0.5" />
+
+              {/* Justify Content */}
+              <div className="flex bg-slate-900 border border-slate-800 rounded p-0.5 gap-0.5">
+                <button
+                  onClick={() => onUpdateStyles({ justifyContent: 'flex-start' })}
+                  className={`p-1 rounded cursor-pointer ${
+                    style.justifyContent === 'flex-start' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:bg-slate-800'
+                  }`}
+                  title="Alinhar ao Início (Justify Start)"
+                >
+                  <svg className="w-3.5 h-3.5" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
+                    <path d="M2 1v10M5 3h4M5 6h5M5 9h4" strokeLinecap="round"/>
+                  </svg>
+                </button>
+                <button
+                  onClick={() => onUpdateStyles({ justifyContent: 'center' })}
+                  className={`p-1 rounded cursor-pointer ${
+                    style.justifyContent === 'center' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:bg-slate-800'
+                  }`}
+                  title="Alinhar ao Centro (Justify Center)"
+                >
+                  <svg className="w-3.5 h-3.5" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
+                    <path d="M6 1v10M3 3h6M2 6h8M3 9h6" strokeLinecap="round"/>
+                  </svg>
+                </button>
+                <button
+                  onClick={() => onUpdateStyles({ justifyContent: 'flex-end' })}
+                  className={`p-1 rounded cursor-pointer ${
+                    style.justifyContent === 'flex-end' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:bg-slate-800'
+                  }`}
+                  title="Alinhar ao Fim (Justify End)"
+                >
+                  <svg className="w-3.5 h-3.5" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
+                    <path d="M10 1v10M7 3h-4M7 6h-5M7 9h-4" strokeLinecap="round"/>
+                  </svg>
+                </button>
+                <button
+                  onClick={() => onUpdateStyles({ justifyContent: 'space-between' })}
+                  className={`p-1 rounded cursor-pointer ${
+                    style.justifyContent === 'space-between' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:bg-slate-800'
+                  }`}
+                  title="Espaço Entre (Justify Space-Between)"
+                >
+                  <svg className="w-3.5 h-3.5" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
+                    <path d="M2 1v10M10 1v10M4 4h4M4 8h4" strokeLinecap="round"/>
+                  </svg>
+                </button>
+              </div>
+
+              {/* Align Items */}
+              <div className="flex bg-slate-900 border border-slate-800 rounded p-0.5 gap-0.5">
+                <button
+                  onClick={() => onUpdateStyles({ alignItems: 'flex-start' })}
+                  className={`p-1 rounded cursor-pointer ${
+                    style.alignItems === 'flex-start' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:bg-slate-800'
+                  }`}
+                  title="Alinhar no Topo (Align Start)"
+                >
+                  <svg className="w-3.5 h-3.5" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
+                    <path d="M1 2h10M3 4v4M6 4v6M9 4v3" strokeLinecap="round"/>
+                  </svg>
+                </button>
+                <button
+                  onClick={() => onUpdateStyles({ alignItems: 'center' })}
+                  className={`p-1 rounded cursor-pointer ${
+                    style.alignItems === 'center' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:bg-slate-800'
+                  }`}
+                  title="Alinhar no Centro (Align Center)"
+                >
+                  <svg className="w-3.5 h-3.5" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
+                    <path d="M1 6h10M3 4v4M6 2v8M9 4v4" strokeLinecap="round"/>
+                  </svg>
+                </button>
+                <button
+                  onClick={() => onUpdateStyles({ alignItems: 'flex-end' })}
+                  className={`p-1 rounded cursor-pointer ${
+                    style.alignItems === 'flex-end' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:bg-slate-800'
+                  }`}
+                  title="Alinhar na Base (Align End)"
+                >
+                  <svg className="w-3.5 h-3.5" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
+                    <path d="M1 10h10M3 8V6M6 8V2M9 8V7" strokeLinecap="round"/>
+                  </svg>
+                </button>
+                <button
+                  onClick={() => onUpdateStyles({ alignItems: 'stretch' })}
+                  className={`p-1 rounded cursor-pointer ${
+                    style.alignItems === 'stretch' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:bg-slate-800'
+                  }`}
+                  title="Esticar Itens (Align Stretch)"
+                >
+                  <svg className="w-3.5 h-3.5" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
+                    <path d="M1 2h10M1 10h10M3 2v8M6 2v8M9 2v8" strokeLinecap="round"/>
+                  </svg>
+                </button>
+              </div>
+
+              {/* Gap controls */}
+              <div className="flex bg-slate-900 border border-slate-800 rounded p-0.5 gap-0.5">
+                <span className="text-[9px] px-1 text-slate-500 flex items-center font-bold">GAP</span>
+                <button
+                  onClick={() => onUpdateStyles({ gap: '0px' })}
+                  className={`px-1.5 py-0.5 rounded text-[9px] font-mono cursor-pointer ${
+                    style.gap === '0px' || !style.gap ? 'bg-blue-600 text-white' : 'text-slate-400 hover:bg-slate-800'
+                  }`}
+                  title="Sem espaçamento (0px)"
+                >
+                  0
+                </button>
+                <button
+                  onClick={() => onUpdateStyles({ gap: '8px' })}
+                  className={`px-1.5 py-0.5 rounded text-[9px] font-mono cursor-pointer ${
+                    style.gap === '8px' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:bg-slate-800'
+                  }`}
+                  title="Espaçamento Curto (8px)"
+                >
+                  8
+                </button>
+                <button
+                  onClick={() => onUpdateStyles({ gap: '16px' })}
+                  className={`px-1.5 py-0.5 rounded text-[9px] font-mono cursor-pointer ${
+                    style.gap === '16px' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:bg-slate-800'
+                  }`}
+                  title="Espaçamento Médio (16px)"
+                >
+                  16
+                </button>
+                <button
+                  onClick={() => onUpdateStyles({ gap: '24px' })}
+                  className={`px-1.5 py-0.5 rounded text-[9px] font-mono cursor-pointer ${
+                    style.gap === '24px' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:bg-slate-800'
+                  }`}
+                  title="Espaçamento Largo (24px)"
+                >
+                  24
+                </button>
+              </div>
+            </>
+          )}
+
+          {/* Grid columns (only if display is grid) */}
+          {style.display === 'grid' && (
+            <div className="flex bg-slate-900 border border-slate-800 rounded p-0.5 gap-0.5">
+              <span className="text-[9px] px-1 text-slate-500 flex items-center font-bold">COLUNAS</span>
+              {[1, 2, 3, 4].map(cols => {
+                const spec = `repeat(${cols}, minmax(0, 1fr))`;
+                const isActive = style.gridTemplateColumns === spec || 
+                  (cols === 2 && !style.gridTemplateColumns); // default to 2 cols
+                return (
+                  <button
+                    key={cols}
+                    onClick={() => onUpdateStyles({ gridTemplateColumns: spec })}
+                    className={`px-1.5 py-0.5 rounded text-[9px] font-mono cursor-pointer ${
+                      isActive ? 'bg-blue-600 text-white' : 'text-slate-400 hover:bg-slate-800'
+                    }`}
+                    title={`Grid de ${cols} coluna(s)`}
+                  >
+                    {cols}x
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Row 3: Classes details */}
+      {showClassesDetails && (() => {
+        const classList = attributes.class
+          ? attributes.class.split(/\s+/).filter(c => c && !c.startsWith('data-editor-'))
+          : [];
+
+        const handleRemoveClass = (clsToRemove: string) => {
+          const updated = classList.filter(c => c !== clsToRemove).join(' ');
+          onUpdateStyles({ class: updated });
+        };
+
+        const handleAddClass = (e: React.FormEvent) => {
+          e.preventDefault();
+          const cleanName = newClassName.trim().replace(/\s+/g, '-');
+          if (cleanName && !classList.includes(cleanName)) {
+            const updated = [...classList, cleanName].join(' ');
+            onUpdateStyles({ class: updated });
+          }
+          setNewClassName('');
+        };
+
+        return (
+          <div className="flex items-center gap-1.5 mt-1.5 bg-slate-950/80 border-t border-slate-800/80 pt-2 px-1.5 pb-1 rounded-b flex-wrap">
+            <span className="text-[9px] text-slate-500 font-bold uppercase tracking-wider flex items-center gap-1">
+              <Hash className="w-3 h-3 text-slate-500" />
+              Classes:
+            </span>
+
+            {/* Render Class Badges */}
+            <div className="flex items-center gap-1 flex-wrap">
+              {classList.length === 0 ? (
+                <span className="text-[10px] text-slate-600 italic">Nenhuma classe aplicada</span>
+              ) : (
+                classList.map(cls => (
+                  <span 
+                    key={cls}
+                    className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-slate-800 text-blue-300 font-mono text-[9px] border border-slate-700/50"
+                  >
+                    {cls}
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveClass(cls)}
+                      className="text-slate-500 hover:text-red-400 font-bold text-[10px] px-0.5 focus:outline-none cursor-pointer"
+                    >
+                      ×
+                    </button>
+                  </span>
+                ))
+              )}
+            </div>
+
+            {/* Input to add class */}
+            <form onSubmit={handleAddClass} className="flex items-center gap-1 ml-auto">
+              <input
+                type="text"
+                placeholder="nova-classe"
+                value={newClassName}
+                onChange={(e) => setNewClassName(e.target.value)}
+                className="bg-slate-900 border border-slate-800 text-[10px] px-1.5 py-0.5 rounded w-24 text-slate-300 focus:outline-none focus:border-blue-500 font-mono"
+              />
+              <button
+                type="submit"
+                className="px-1.5 py-0.5 bg-blue-600 hover:bg-blue-700 text-white rounded text-[10px] font-bold cursor-pointer"
+              >
+                +
+              </button>
+            </form>
+          </div>
+        );
+      })()}
     </div>
   );
 }

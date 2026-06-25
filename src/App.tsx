@@ -31,7 +31,8 @@ import {
   Eye,
   Maximize,
   Layers,
-  Search
+  Search,
+  Component
 } from 'lucide-react';
 import { CommandPalette } from './components/CommandPalette';
 import type { CommandItem } from './components/CommandPalette';
@@ -204,14 +205,15 @@ export default function App() {
     if (el) {
       const htmlEl = el as HTMLElement;
       Object.entries(styles).forEach(([key, value]) => {
-        const attributeKeys = ['src', 'id', 'title', 'href', 'target', 'alt', 'role', 'aria-label'];
+        const attributeKeys = ['src', 'id', 'title', 'href', 'target', 'alt', 'role', 'aria-label', 'class', 'className'];
         const isAttribute = attributeKeys.includes(key) || key.startsWith('aria-') || key.startsWith('data-');
         
         if (isAttribute) {
+          const attrName = key === 'className' ? 'class' : key;
           if (value === '') {
-            htmlEl.removeAttribute(key);
+            htmlEl.removeAttribute(attrName);
           } else {
-            htmlEl.setAttribute(key, value);
+            htmlEl.setAttribute(attrName, value);
           }
         } else {
           htmlEl.style[key as any] = value;
@@ -421,11 +423,171 @@ export default function App() {
       const clonedHtml = injectEditorIds(clone.outerHTML, startId);
       const parsedCloneDoc = parser.parseFromString(clonedHtml, 'text/html');
       const cleanClone = parsedCloneDoc.body.firstElementChild;
-      
       if (cleanClone) {
         el.parentNode?.insertBefore(cleanClone, el.nextSibling);
         await updateHtml(doc.documentElement.outerHTML, `Duplicou ${el.tagName.toLowerCase()}`);
       }
+    }
+  };
+
+  const handleInsertPresetComponent = async (elementId: string | null, componentType: string) => {
+    const templates: Record<string, string> = {
+      hero: `
+        <section class="hero-section" style="padding: 60px 20px; display: flex; flex-direction: column; align-items: center; text-align: center; background-color: #0f172a; color: #f8fafc; border-radius: 8px;">
+          <h1 style="font-size: 48px; margin-bottom: 20px; font-weight: 800; color: #ffffff;">Revolucione Seu Workflow</h1>
+          <p style="font-size: 18px; margin-bottom: 30px; color: #94a3b8; max-width: 600px;">A plataforma definitiva para criar designs premium de maneira ultra-veloz, integrando inteligência artificial e layout flexível.</p>
+          <div style="display: flex; gap: 16px; justify-content: center;">
+            <a href="#" style="padding: 12px 24px; background-color: #2563eb; color: #ffffff; border-radius: 8px; font-weight: 600; text-decoration: none;">Começar Grátis</a>
+            <a href="#" style="padding: 12px 24px; background-color: #334155; color: #f8fafc; border-radius: 8px; font-weight: 600; text-decoration: none;">Ver Demo</a>
+          </div>
+        </section>
+      `,
+      features: `
+        <section class="features-grid" style="padding: 60px 20px; background-color: #020617; color: #e2e8f0; border-radius: 8px;">
+          <h2 style="font-size: 32px; text-align: center; margin-bottom: 40px; font-weight: 700; color: #ffffff;">Recursos Poderosos</h2>
+          <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px;">
+            <div style="padding: 24px; background-color: #0f172a; border: 1px solid #1e293b; border-radius: 12px; display: flex; flex-direction: column; gap: 12px;">
+              <div style="font-size: 24px;">⚡</div>
+              <h3 style="font-size: 18px; font-weight: 600; color: #ffffff;">Performance Extrema</h3>
+              <p style="font-size: 14px; color: #94a3b8; margin: 0;">Código limpo e otimizado para o máximo de velocidade de carregamento e pontuações de SEO perfeitas.</p>
+            </div>
+            <div style="padding: 24px; background-color: #0f172a; border: 1px solid #1e293b; border-radius: 12px; display: flex; flex-direction: column; gap: 12px;">
+              <div style="font-size: 24px;">🎨</div>
+              <h3 style="font-size: 18px; font-weight: 600; color: #ffffff;">Design Moderno</h3>
+              <p style="font-size: 14px; color: #94a3b8; margin: 0;">Visual limpo baseado em tokens modernos, gradientes suaves e espaçamentos consistentes.</p>
+            </div>
+            <div style="padding: 24px; background-color: #0f172a; border: 1px solid #1e293b; border-radius: 12px; display: flex; flex-direction: column; gap: 12px;">
+              <div style="font-size: 24px;">🤖</div>
+              <h3 style="font-size: 18px; font-weight: 600; color: #ffffff;">Copiloto IA</h3>
+              <p style="font-size: 14px; color: #94a3b8; margin: 0;">Refatore layouts e alterne conteúdos instantaneamente com comandos naturais simples.</p>
+            </div>
+          </div>
+        </section>
+      `,
+      pricing: `
+        <section class="pricing-section" style="padding: 60px 20px; background-color: #0f172a; color: #e2e8f0; border-radius: 8px;">
+          <h2 style="font-size: 32px; text-align: center; margin-bottom: 12px; font-weight: 700; color: #ffffff;">Planos Flexíveis</h2>
+          <p style="font-size: 14px; text-align: center; color: #94a3b8; margin-bottom: 40px;">Escolha o plano ideal para a sua equipe ou projeto individual.</p>
+          <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; max-width: 900px; margin: 0 auto;">
+            <div style="padding: 24px; background-color: #020617; border: 1px solid #1e293b; border-radius: 12px; display: flex; flex-direction: column; gap: 16px;">
+              <div>
+                <h3 style="font-size: 16px; font-weight: 600; color: #94a3b8; text-transform: uppercase;">Starter</h3>
+                <p style="font-size: 28px; font-weight: 800; color: #ffffff; margin-top: 8px;">Grátis</p>
+              </div>
+              <p style="font-size: 13px; color: #94a3b8; margin: 0;">Ideal para experimentações e landing pages iniciais.</p>
+              <hr style="border: 0; border-top: 1px solid #1e293b; margin: 0;">
+              <ul style="font-size: 13px; color: #cbd5e1; display: flex; flex-direction: column; gap: 8px; padding: 0; list-style: none; margin: 0;">
+                <li>✓ 1 Projeto Ativo</li>
+                <li>✓ Exportação Manual</li>
+                <li>✓ Auto-Layout Básico</li>
+              </ul>
+              <a href="#" style="padding: 10px 16px; background-color: #1e293b; color: #ffffff; text-align: center; border-radius: 6px; font-weight: 600; text-decoration: none; font-size: 13px; margin-top: auto;">Começar</a>
+            </div>
+            <div style="padding: 24px; background-color: #1e1b4b; border: 2px solid #6366f1; border-radius: 12px; display: flex; flex-direction: column; gap: 16px; position: relative;">
+              <span style="position: absolute; top: -12px; right: 16px; background-color: #6366f1; color: #ffffff; font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 20px; text-transform: uppercase;">Mais Popular</span>
+              <div>
+                <h3 style="font-size: 16px; font-weight: 600; color: #c7d2fe; text-transform: uppercase;">Pro</h3>
+                <p style="font-size: 28px; font-weight: 800; color: #ffffff; margin-top: 8px;">$29<span style="font-size: 14px; font-weight: 400; color: #c7d2fe;">/mês</span></p>
+              </div>
+              <p style="font-size: 13px; color: #c7d2fe; margin: 0;">Perfeito para criadores e equipes em crescimento.</p>
+              <hr style="border: 0; border-top: 1px solid #312e81; margin: 0;">
+              <ul style="font-size: 13px; color: #e0e7ff; display: flex; flex-direction: column; gap: 8px; padding: 0; list-style: none; margin: 0;">
+                <li>✓ Projetos Ilimitados</li>
+                <li>✓ Suporte IA</li>
+                <li>✓ CSS Customizado</li>
+              </ul>
+              <a href="#" style="padding: 10px 16px; background-color: #6366f1; color: #ffffff; text-align: center; border-radius: 6px; font-weight: 600; text-decoration: none; font-size: 13px; margin-top: auto;">Assinar Pro</a>
+            </div>
+            <div style="padding: 24px; background-color: #020617; border: 1px solid #1e293b; border-radius: 12px; display: flex; flex-direction: column; gap: 16px;">
+              <div>
+                <h3 style="font-size: 16px; font-weight: 600; color: #94a3b8; text-transform: uppercase;">Enterprise</h3>
+                <p style="font-size: 28px; font-weight: 800; color: #ffffff; margin-top: 8px;">Custom</p>
+              </div>
+              <p style="font-size: 13px; color: #94a3b8; margin: 0;">Para organizações que demandam segurança.</p>
+              <hr style="border: 0; border-top: 1px solid #1e293b; margin: 0;">
+              <ul style="font-size: 13px; color: #cbd5e1; display: flex; flex-direction: column; gap: 8px; padding: 0; list-style: none; margin: 0;">
+                <li>✓ SSO & Permissões</li>
+                <li>✓ SLA de Disponibilidade</li>
+                <li>✓ API Customizada</li>
+              </ul>
+              <a href="#" style="padding: 10px 16px; background-color: #1e293b; color: #ffffff; text-align: center; border-radius: 6px; font-weight: 600; text-decoration: none; font-size: 13px; margin-top: auto;">Falar com Vendas</a>
+            </div>
+          </div>
+        </section>
+      `,
+      testimonials: `
+        <section class="testimonial-section" style="padding: 60px 20px; background-color: #020617; color: #e2e8f0; border-radius: 8px;">
+          <h2 style="font-size: 32px; text-align: center; margin-bottom: 40px; font-weight: 700; color: #ffffff;">O Que Dizem de Nós</h2>
+          <div style="display: flex; gap: 24px; justify-content: center; max-width: 900px; margin: 0 auto;">
+            <div style="flex: 1; padding: 24px; background-color: #0f172a; border: 1px solid #1e293b; border-radius: 12px; display: flex; flex-direction: column; gap: 16px;">
+              <p style="font-size: 14px; color: #cbd5e1; line-height: 1.6; margin: 0; font-style: italic;">"O STRAT Editor elevou a produtividade do nosso time de front-end em 300%. A interface sem painéis complexos e a edição contextual são revolucionárias."</p>
+              <div style="display: flex; align-items: center; gap: 12px;">
+                <div style="width: 36px; height: 36px; border-radius: 50%; background-color: #3b82f6; display: flex; align-items: center; justify-content: center; font-weight: 700; color: #ffffff; font-size: 12px;">AF</div>
+                <div>
+                  <h4 style="font-size: 13px; font-weight: 600; color: #ffffff; margin: 0;">Arthur Faria</h4>
+                  <span style="font-size: 11px; color: #94a3b8;">CTO, TechCorp</span>
+                </div>
+              </div>
+            </div>
+            <div style="flex: 1; padding: 24px; background-color: #0f172a; border: 1px solid #1e293b; border-radius: 12px; display: flex; flex-direction: column; gap: 16px;">
+              <p style="font-size: 14px; color: #cbd5e1; line-height: 1.6; margin: 0; font-style: italic;">"Desenhar HTML semântico com auto-layout se tornou extremamente prazeroso. O controle de margens e o copiloto de IA dão superpoderes de criação."</p>
+              <div style="display: flex; align-items: center; gap: 12px;">
+                <div style="width: 36px; height: 36px; border-radius: 50%; background-color: #10b981; display: flex; align-items: center; justify-content: center; font-weight: 700; color: #ffffff; font-size: 12px;">MM</div>
+                <div>
+                  <h4 style="font-size: 13px; font-weight: 600; color: #ffffff; margin: 0;">Mariana Melo</h4>
+                  <span style="font-size: 11px; color: #94a3b8;">Principal UX Engineer, DesignFlow</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+      `,
+      footer: `
+        <footer class="footer-section" style="padding: 40px 20px; background-color: #0f172a; border-top: 1px solid #1e293b; color: #94a3b8; font-size: 13px; border-radius: 8px;">
+          <div style="max-width: 900px; margin: 0 auto; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px;">
+            <div>
+              <span style="font-size: 16px; font-weight: 700; color: #ffffff;">STRAT <span style="color: #3b82f6;">Editor</span></span>
+              <p style="margin: 4px 0 0 0; font-size: 11px; color: #64748b;">© 2026 STRAT Technologies Inc. Todos os direitos reservados.</p>
+            </div>
+            <div style="display: flex; gap: 16px;">
+              <a href="#" style="color: #94a3b8; text-decoration: none;">Termos</a>
+              <a href="#" style="color: #94a3b8; text-decoration: none;">Privacidade</a>
+              <a href="#" style="color: #94a3b8; text-decoration: none;">Contato</a>
+            </div>
+          </div>
+        </footer>
+      `
+    };
+
+    const template = templates[componentType];
+    if (!template) return;
+
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(htmlContent, 'text/html');
+    const startId = getMaxEditorId(htmlContent) + 1;
+    const templateWithIds = injectEditorIds(template, startId);
+    
+    const parsedTemplateDoc = parser.parseFromString(templateWithIds, 'text/html');
+    const cleanComponent = parsedTemplateDoc.body.firstElementChild;
+    
+    if (!cleanComponent) return;
+
+    if (elementId) {
+      const el = doc.querySelector(`[data-editor-id="${elementId}"]`);
+      if (el) {
+        const tagNameLower = el.tagName.toLowerCase();
+        const isContainer = ['div', 'section', 'article', 'header', 'footer', 'main', 'body'].includes(tagNameLower);
+        
+        if (isContainer) {
+          el.appendChild(cleanComponent);
+        } else {
+          el.parentNode?.insertBefore(cleanComponent, el.nextSibling);
+        }
+        await updateHtml(doc.documentElement.outerHTML, `Inseriu Componente ${componentType} em ${el.tagName.toLowerCase()}`);
+      }
+    } else {
+      doc.body.appendChild(cleanComponent);
+      await updateHtml(doc.documentElement.outerHTML, `Inseriu Componente ${componentType} no Corpo`);
     }
   };
 
@@ -845,6 +1007,41 @@ export default function App() {
         category: 'Projeto',
         icon: <FolderOpen className="w-3.5 h-3.5" />,
         action: handleOpenDirectory
+      },
+      {
+        id: 'insert-hero',
+        name: 'Inserir Seção: Hero Section',
+        category: 'Projeto',
+        icon: <Component className="w-3.5 h-3.5 text-blue-400" />,
+        action: () => handleInsertPresetComponent(selectedElementId, 'hero')
+      },
+      {
+        id: 'insert-features',
+        name: 'Inserir Seção: Features Grid',
+        category: 'Projeto',
+        icon: <Component className="w-3.5 h-3.5 text-emerald-400" />,
+        action: () => handleInsertPresetComponent(selectedElementId, 'features')
+      },
+      {
+        id: 'insert-pricing',
+        name: 'Inserir Seção: Pricing Table',
+        category: 'Projeto',
+        icon: <Component className="w-3.5 h-3.5 text-indigo-400" />,
+        action: () => handleInsertPresetComponent(selectedElementId, 'pricing')
+      },
+      {
+        id: 'insert-testimonials',
+        name: 'Inserir Seção: Depoimentos',
+        category: 'Projeto',
+        icon: <Component className="w-3.5 h-3.5 text-purple-400" />,
+        action: () => handleInsertPresetComponent(selectedElementId, 'testimonials')
+      },
+      {
+        id: 'insert-footer',
+        name: 'Inserir Seção: Footer Moderno',
+        category: 'Projeto',
+        icon: <Component className="w-3.5 h-3.5 text-slate-400" />,
+        action: () => handleInsertPresetComponent(selectedElementId, 'footer')
       }
     ];
   }, [selectedElementId, htmlContent, undoStack, redoStack]);
@@ -1087,6 +1284,7 @@ export default function App() {
           onReorderElement={handleReorderElement}
           onMoveElementOut={handleMoveElementOut}
           onGroupElement={handleGroupElement}
+          onInsertComponent={handleInsertPresetComponent}
           
           zoomScale={zoomScale}
           onZoomChange={setZoomScale}

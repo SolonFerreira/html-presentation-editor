@@ -93,4 +93,66 @@ describe('ContextualHUD Component', () => {
     fireEvent.click(duplicateBtn);
     expect(defaultProps.onDuplicate).toHaveBeenCalled();
   });
+
+  it('toggles layout panel and interacts with flex controls', () => {
+    render(<ContextualHUD {...defaultProps} tagName="div" />);
+    const layoutToggle = screen.getByTitle('Ajustar Alinhamento e Layout');
+    expect(layoutToggle).not.toBeNull();
+
+    // Click to open layout details
+    fireEvent.click(layoutToggle);
+
+    const flexColBtn = screen.getByTitle('Flex Col (Empilhado)');
+    expect(flexColBtn).not.toBeNull();
+
+    fireEvent.click(flexColBtn);
+    expect(defaultProps.onUpdateStyles).toHaveBeenCalledWith({ display: 'flex', flexDirection: 'column' });
+  });
+
+  it('shows component insertion dropdown and handles click', () => {
+    const insertMock = vi.fn();
+    render(<ContextualHUD {...defaultProps} onInsertComponent={insertMock} />);
+    const insertToggle = screen.getByTitle('Inserir Componente');
+    expect(insertToggle).not.toBeNull();
+
+    fireEvent.click(insertToggle);
+
+    const heroOption = screen.getByText('Hero Section');
+    expect(heroOption).not.toBeNull();
+
+    fireEvent.click(heroOption);
+    expect(insertMock).toHaveBeenCalledWith('hero');
+  });
+
+  it('toggles classes panel, shows class badges and adds new class', () => {
+    const propsWithClasses = {
+      ...defaultProps,
+      attributes: {
+        ...defaultProps.attributes,
+        class: 'bg-blue-500 shadow'
+      }
+    };
+    render(<ContextualHUD {...propsWithClasses} />);
+    const classesToggle = screen.getByTitle('Editar Classes CSS');
+    expect(classesToggle).not.toBeNull();
+
+    fireEvent.click(classesToggle);
+
+    // Should render class pills
+    const pill1 = screen.getByText('bg-blue-500');
+    const pill2 = screen.getByText('shadow');
+    expect(pill1).not.toBeNull();
+    expect(pill2).not.toBeNull();
+
+    // Add new class
+    const input = screen.getByPlaceholderText('nova-classe');
+    fireEvent.change(input, { target: { value: 'rounded-lg' } });
+    
+    // Submit form
+    const submitBtn = screen.getByText('+');
+    fireEvent.click(submitBtn);
+
+    // expect onUpdateStyles to have been called with combined classes
+    expect(defaultProps.onUpdateStyles).toHaveBeenCalledWith({ class: 'bg-blue-500 shadow rounded-lg' });
+  });
 });
