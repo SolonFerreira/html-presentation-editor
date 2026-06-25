@@ -1,0 +1,35 @@
+export interface SemanticElement {
+  id: string;        // Unique temporary editor ID (e.g., 'el-1', 'el-2')
+  tagName: string;   // HTML tag name (e.g., 'DIV', 'H1', 'IMG')
+  role: 'slide' | 'card' | 'title' | 'text' | 'image' | 'container' | 'button' | 'unknown';
+  text?: string;     // Inner text if applicable (and short)
+  classes: string[]; // List of CSS classes
+  style: Record<string, string>; // Inline styles (or computed styles)
+  children: SemanticElement[];
+  xpath: string;     // XPath or selector to map back to the real DOM element
+}
+
+export interface FileItem {
+  name: string;
+  relativePath: string;
+  type: 'file' | 'directory';
+  handle: FileSystemFileHandle | FileSystemDirectoryHandle;
+  content?: string; // Text content (loaded for html, css, js)
+  blobUrl?: string; // Blob URL for preview (loaded for images)
+  mimeType?: string;
+}
+
+export interface ProjectDirectory {
+  handle: FileSystemDirectoryHandle;
+  name: string;
+  files: Record<string, FileItem>; // key: relativePath
+}
+
+export interface EditorState {
+  project: ProjectDirectory | null;
+  activeHtmlPath: string | null; // e.g., 'index.html'
+  selectedElementId: string | null;
+  hoveredElementId: string | null;
+  semanticTree: SemanticElement[];
+  undoStack: string[]; // Stack of HTML contents for undoing
+}
