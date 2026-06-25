@@ -7,6 +7,8 @@ export interface SemanticElement {
   style: Record<string, string>; // Inline styles (or computed styles)
   children: SemanticElement[];
   xpath: string;     // XPath or selector to map back to the real DOM element
+  isLocked?: boolean; // If element is locked in layers panel
+  isHidden?: boolean; // If element is hidden in layers panel
 }
 
 export interface FileItem {
@@ -25,11 +27,25 @@ export interface ProjectDirectory {
   files: Record<string, FileItem>; // key: relativePath
 }
 
+export interface VersionEntry {
+  id: string;
+  timestamp: string;
+  description: string;
+  htmlContent: string;
+}
+
+export type ViewportMode = 'desktop' | 'tablet' | 'mobile';
+
 export interface EditorState {
   project: ProjectDirectory | null;
   activeHtmlPath: string | null; // e.g., 'index.html'
   selectedElementId: string | null;
   hoveredElementId: string | null;
   semanticTree: SemanticElement[];
-  undoStack: string[]; // Stack of HTML contents for undoing
+  undoStack: string[];
+  redoStack: string[];
+  zoomScale: number;
+  viewportMode: ViewportMode;
+  presentationMode: boolean;
+  versionHistory: VersionEntry[];
 }

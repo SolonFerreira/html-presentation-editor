@@ -133,7 +133,9 @@ export function generateSemanticTree(rootElement: Element): SemanticElement[] {
       classes: Array.from(element.classList),
       style: inlineStyle,
       children: [],
-      xpath: getElementXPath(element)
+      xpath: getElementXPath(element),
+      isLocked: element.getAttribute('data-editor-locked') === 'true',
+      isHidden: element.getAttribute('data-editor-hidden') === 'true'
     };
 
     parentList.push(node);
@@ -230,6 +232,17 @@ export function prepareHtmlForPreview(
     /* Disable transitions to prevent overlay lagging during hover/animations */
     * {
       transition: none !important;
+    }
+
+    /* Lock elements (pointer-events-none so click passes through to parent) */
+    [data-editor-locked="true"] {
+      pointer-events: none !important;
+      outline: 1px dashed rgba(239, 68, 68, 0.3) !important;
+    }
+
+    /* Hide hidden elements */
+    [data-editor-hidden="true"] {
+      display: none !important;
     }
   `;
   head.appendChild(helperStyle);

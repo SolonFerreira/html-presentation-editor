@@ -1,5 +1,6 @@
 import { useRef, useEffect, useState } from 'react';
 import { SelectionOverlay } from './SelectionOverlay';
+import type { ViewportMode } from '../types';
 
 interface Rect {
   top: number;
@@ -17,6 +18,11 @@ interface CanvasProps {
   onUpdateText: (elementId: string, text: string) => void;
   onDeleteElement: (elementId: string) => void;
   onQuickFontChange: (elementId: string, dir: 'up' | 'down') => void;
+  
+  // New canvas attributes
+  zoomScale: number;
+  viewportMode: ViewportMode;
+  presentationMode: boolean;
 }
 
 export function Canvas({
@@ -27,7 +33,11 @@ export function Canvas({
   onHoverElement,
   onUpdateText,
   onDeleteElement,
-  onQuickFontChange
+  onQuickFontChange,
+  
+  zoomScale,
+  viewportMode,
+  presentationMode
 }: CanvasProps) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -37,14 +47,14 @@ export function Canvas({
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
   const [hoveredTag, setHoveredTag] = useState<string | null>(null);
 
-  // Helper to calculate rect relative to the iframe wrapper container
+  // Measure and align boundaries
   const updateElementRects = () => {
     const iframe = iframeRef.current;
     if (!iframe || !iframe.contentDocument) return;
 
     const iframeDoc = iframe.contentDocument;
 
-    // 1. Calculate Selected Rect
+    // 1. Calculate Selected Rect (relative to iframe viewport)
     if (selectedElementId) {
       const selectedEl = iframeDoc.querySelector(`[data-editor-id="${selectedElementId}"]`);
       if (selectedEl) {
@@ -65,7 +75,7 @@ export function Canvas({
       setSelectedTag(null);
     }
 
-    // 2. Calculate Hovered Rect
+    // 2. Calculate Hovered Rect (relative to iframe viewport)
     if (hoveredElementId) {
       const hoveredEl = iframeDoc.querySelector(`[data-editor-id="${hoveredElementId}"]`);
       if (hoveredEl) {
@@ -87,12 +97,12 @@ export function Canvas({
     }
   };
 
-  // Re-measure on mount, selection change, or html change
+  // Re-measure on state changes
   useEffect(() => {
     updateElementRects();
-  }, [selectedElementId, hoveredElementId, htmlContent]);
+  }, [selectedElementId, hoveredElementId, htmlContent, zoomScale, viewportMode]);
 
-  // Set up iframe event listeners once document loads
+  // Set up iframe event listeners
   const handleIframeLoad = () => {
     const iframe = iframeRef.current;
     if (!iframe || !iframe.contentDocument) return;
@@ -105,7 +115,21 @@ export function Canvas({
       e.stopPropagation();
       
       const target = e.target as HTMLElement;
-      const editorId = target.getAttribute('data-editor-id');
+      
+      // If parent is locked, click delegates up or does nothing. We find first non-locked ancestor
+      let currentEl: HTMLElement | null = target;
+      let editorId: string | null = null;
+      
+      while (currentEl && currentEl.tagName !== 'BODY') {
+        if (currentEl.getAttribute('data-editor-locked') === 'true') {
+          // If locked, we skip this node and click parent
+          currentEl = currentEl.parentElement;
+          continue;
+        }
+        editorId = currentEl.getAttribute('data-editor-id');
+        if (editorId) break;
+        currentEl = currentEl.parentElement;
+      }
       
       if (editorId) {
         onSelectElement(editorId);
@@ -117,7 +141,20 @@ export function Canvas({
     // 2. Intercept Mouse Hover
     const handleMouseOver = (e: MouseEvent) => {
       const target = e.target as HTMLElement;
-      const editorId = target.getAttribute('data-editor-id');
+      
+      let currentEl: HTMLElement | null = target;
+      let editorId: string | null = null;
+      
+      while (currentEl && currentEl.tagName !== 'BODY') {
+        if (currentEl.getAttribute('data-editor-locked') === 'true') {
+          currentEl = currentEl.parentElement;
+          continue;
+        }
+        editorId = currentEl.getAttribute('data-editor-id');
+        if (editorId) break;
+        currentEl = currentEl.parentElement;
+      }
+
       if (editorId) {
         onHoverElement(editorId);
       }
@@ -127,22 +164,19 @@ export function Canvas({
       onHoverElement(null);
     };
 
-    // 3. Intercept Scroll & Resize to update overlays
     const handleScroll = () => {
       updateElementRects();
     };
 
-    // 4. Double Click for Inline Text Editing
+    // 3. Double Click for Inline Text Editing
     const handleDoubleClick = (e: MouseEvent) => {
       const target = e.target as HTMLElement;
       const editorId = target.getAttribute('data-editor-id');
-      if (!editorId || target.tagName === 'IMG') return;
+      if (!editorId || target.tagName === 'IMG' || target.getAttribute('data-editor-locked') === 'true') return;
 
-      // Enable contenteditable
       target.setAttribute('contenteditable', 'true');
       target.focus();
 
-      // Listen to text change
       const saveText = () => {
         target.removeAttribute('contenteditable');
         onUpdateText(editorId, target.innerText);
@@ -165,7 +199,6 @@ export function Canvas({
     iframeDoc.addEventListener('scroll', handleScroll, true);
     iframeDoc.addEventListener('dblclick', handleDoubleClick, true);
 
-    // Watch for size changes inside the iframe (element shifts, page expands)
     const resizeObserver = new ResizeObserver(() => {
       updateElementRects();
     });
@@ -173,7 +206,6 @@ export function Canvas({
       resizeObserver.observe(iframeDoc.body);
     }
 
-    // Clean up
     return () => {
       iframeDoc.removeEventListener('click', handleClick, true);
       iframeDoc.removeEventListener('mouseover', handleMouseOver, true);
@@ -185,7 +217,6 @@ export function Canvas({
   };
 
   useEffect(() => {
-    // Whenever content changes, we must wait for iframe load/render
     const iframe = iframeRef.current;
     if (iframe) {
       const cleanup = handleIframeLoad();
@@ -204,43 +235,91 @@ export function Canvas({
     }
   };
 
+  // Determine viewport dimensions
+  const getViewportDimensions = () => {
+    switch (viewportMode) {
+      case 'tablet':
+        return { width: '768px', height: '1024px' };
+      case 'mobile':
+        return { width: '375px', height: '812px' };
+      default:
+        return { width: '1024px', height: '576px' }; // 16:9 standard
+    }
+  };
+
+  const { width, height } = getViewportDimensions();
+
+  // If presentation mode is active, override styling to take full screen
+  if (presentationMode) {
+    return (
+      <div className="flex-1 bg-black flex items-center justify-center p-0 overflow-hidden relative z-50">
+        <div 
+          className="relative bg-black overflow-hidden"
+          style={{ width: '1024px', height: '576px' }}
+        >
+          {htmlContent && (
+            <iframe
+              ref={iframeRef}
+              srcDoc={htmlContent}
+              className="w-full h-full border-none pointer-events-auto"
+              title="Presentation screen"
+            />
+          )}
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="flex-1 bg-slate-950 flex items-center justify-center p-8 overflow-auto select-none relative">
-      <div 
-        ref={containerRef}
-        className="relative bg-white shadow-2xl border border-slate-800 rounded-lg overflow-hidden transition-all duration-150"
+    <div className="flex-1 bg-slate-950 flex items-center justify-center p-12 overflow-auto select-none relative canvas-grid-background">
+      {/* 
+        The transformed wrapper. The scale matches zoomScale.
+        Using transform-origin-center to center scaling, or transform-origin-top-left
+        and wrapping in an inner container is ideal for positioning.
+      */}
+      <div
         style={{
-          width: '1024px',  // Locked 16:9 widescreen presentation canvas preview
-          height: '576px',
+          transform: `scale(${zoomScale})`,
+          transformOrigin: 'center center',
+          transition: 'transform 0.15s cubic-bezier(0.4, 0, 0.2, 1)',
         }}
       >
-        {htmlContent ? (
-          <iframe
-            ref={iframeRef}
-            srcDoc={htmlContent}
-            className="w-full h-full border-none pointer-events-auto"
-            title="HTML presentation preview"
-            onLoad={handleIframeLoad}
-          />
-        ) : (
-          <div className="w-full h-full flex flex-col items-center justify-center bg-slate-900 text-slate-500 p-6 text-center">
-            <p className="text-sm font-semibold mb-1">Nenhum slide carregado</p>
-            <p className="text-xs text-slate-600 max-w-sm">
-              Use o botão "Importar Projeto" na barra superior para carregar sua apresentação HTML.
-            </p>
-          </div>
-        )}
+        <div 
+          ref={containerRef}
+          className="relative bg-white shadow-2xl border border-slate-800 rounded-lg overflow-hidden"
+          style={{ width, height }}
+        >
+          {htmlContent ? (
+            <iframe
+              ref={iframeRef}
+              srcDoc={htmlContent}
+              className="w-full h-full border-none pointer-events-auto"
+              title="HTML presentation preview"
+              onLoad={handleIframeLoad}
+            />
+          ) : (
+            <div className="w-full h-full flex flex-col items-center justify-center bg-slate-900 text-slate-500 p-6 text-center">
+              <p className="text-sm font-semibold mb-1">Nenhum slide carregado</p>
+              <p className="text-xs text-slate-600 max-w-sm">
+                Importe um projeto para começar a desenhar.
+              </p>
+            </div>
+          )}
 
-        {/* Floating selection handle borders overlay */}
-        {htmlContent && (
-          <SelectionOverlay
-            selectedRect={selectedRect}
-            hoveredRect={hoveredRect}
-            selectedTag={selectedTag}
-            hoveredTag={hoveredTag}
-            quickAction={handleQuickAction}
-          />
-        )}
+          {/* 
+            SelectionOverlay is nested inside the SCALED wrapper container.
+            This ensures coordinates (left, top, width, height) are scaled automatically!
+          */}
+          {htmlContent && (
+            <SelectionOverlay
+              selectedRect={selectedRect}
+              hoveredRect={hoveredRect}
+              selectedTag={selectedTag}
+              hoveredTag={hoveredTag}
+              quickAction={handleQuickAction}
+            />
+          )}
+        </div>
       </div>
     </div>
   );
