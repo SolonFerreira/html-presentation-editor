@@ -1111,6 +1111,7 @@ export function Canvas({
         >
           {htmlContent && (
             <iframe
+              key="presentation-iframe"
               ref={iframeRef}
               srcDoc={htmlContent}
               className="w-full h-full border-none pointer-events-auto"
@@ -1207,6 +1208,7 @@ export function Canvas({
 
           {htmlContent ? (
             <iframe
+              key="editor-iframe"
               ref={iframeRef}
               srcDoc={htmlContent}
               className="w-full h-full border-none pointer-events-auto"

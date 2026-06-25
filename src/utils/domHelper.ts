@@ -357,7 +357,8 @@ export function generateSemanticTree(rootElement: Element): SemanticElement[] {
  */
 export function prepareHtmlForPreview(
   htmlContent: string,
-  filesMap: Record<string, FileItem>
+  filesMap: Record<string, FileItem>,
+  isPresentation = false
 ): string {
   const parser = new DOMParser();
   const doc = parser.parseFromString(htmlContent, 'text/html');
@@ -413,44 +414,46 @@ export function prepareHtmlForPreview(
     }
   });
 
-  // 4. Inject Editor helper styles into <head>
-  const head = doc.head || doc.createElement('head');
-  if (!doc.head) {
-    doc.documentElement.insertBefore(head, doc.body);
+  // 4. Inject Editor helper styles into <head> (only if not in presentation mode)
+  if (!isPresentation) {
+    const head = doc.head || doc.createElement('head');
+    if (!doc.head) {
+      doc.documentElement.insertBefore(head, doc.body);
+    }
+
+    const helperStyle = doc.createElement('style');
+    helperStyle.id = 'editor-helpers';
+    helperStyle.textContent = `
+      /* Disable default interactions to prevent navigation or clicks triggering actions */
+      a, button, input, select, textarea {
+        pointer-events: none !important;
+      }
+      
+      /* Make active text contenteditable editable, restore mouse pointer pointer-events */
+      [contenteditable="true"] {
+        pointer-events: auto !important;
+        outline: 2px dashed #3b82f6 !important;
+        background-color: rgba(59, 130, 246, 0.05) !important;
+      }
+
+      /* Disable transitions to prevent overlay lagging during hover/animations */
+      * {
+        transition: none !important;
+      }
+
+      /* Lock elements (pointer-events-none so click passes through to parent) */
+      [data-editor-locked="true"] {
+        pointer-events: none !important;
+        outline: 1px dashed rgba(239, 68, 68, 0.3) !important;
+      }
+
+      /* Hide hidden elements */
+      [data-editor-hidden="true"] {
+        display: none !important;
+      }
+    `;
+    head.appendChild(helperStyle);
   }
-
-  const helperStyle = doc.createElement('style');
-  helperStyle.id = 'editor-helpers';
-  helperStyle.textContent = `
-    /* Disable default interactions to prevent navigation or clicks triggering actions */
-    a, button, input, select, textarea {
-      pointer-events: none !important;
-    }
-    
-    /* Make active text contenteditable editable, restore mouse pointer pointer-events */
-    [contenteditable="true"] {
-      pointer-events: auto !important;
-      outline: 2px dashed #3b82f6 !important;
-      background-color: rgba(59, 130, 246, 0.05) !important;
-    }
-
-    /* Disable transitions to prevent overlay lagging during hover/animations */
-    * {
-      transition: none !important;
-    }
-
-    /* Lock elements (pointer-events-none so click passes through to parent) */
-    [data-editor-locked="true"] {
-      pointer-events: none !important;
-      outline: 1px dashed rgba(239, 68, 68, 0.3) !important;
-    }
-
-    /* Hide hidden elements */
-    [data-editor-hidden="true"] {
-      display: none !important;
-    }
-  `;
-  head.appendChild(helperStyle);
 
   return doc.documentElement.outerHTML;
 }

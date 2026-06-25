@@ -163,7 +163,12 @@ export default function App() {
   // Compute prepared sandbox HTML preview
   const previewHtml = useMemo(() => {
     if (!htmlContent || !project) return '';
-    return prepareHtmlForPreview(htmlContent, project.files);
+    return prepareHtmlForPreview(htmlContent, project.files, false);
+  }, [htmlContent, project]);
+
+  const presentationHtml = useMemo(() => {
+    if (!htmlContent || !project) return '';
+    return prepareHtmlForPreview(htmlContent, project.files, true);
   }, [htmlContent, project]);
 
 
@@ -1393,7 +1398,7 @@ export default function App() {
 
         {/* Central Iframe Canvas Workspace (Responsive width & Zoom) */}
         <Canvas
-          htmlContent={previewHtml}
+          htmlContent={presentationMode ? presentationHtml : previewHtml}
           selectedElementId={selectedElementId}
           selectedElementIds={selectedElementIds}
           hoveredElementId={hoveredElementId}
