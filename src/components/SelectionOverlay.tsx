@@ -41,6 +41,7 @@ export function SelectionOverlay({
   selectedPadding,
   selectedDisplay,
   selectedFlexDirection,
+  draggedId,
   dropPosition,
   dropTargetRect
 }: SelectionOverlayProps) {
@@ -281,7 +282,7 @@ export function SelectionOverlay({
 
                 {/* Tag Name Badge with Grip Handle */}
                 {selectedTag && (
-                  <div className="absolute top-0 left-0 -translate-y-full bg-blue-600 text-white font-mono text-[9px] font-bold px-1.5 py-0.5 rounded-t shadow-md whitespace-nowrap flex items-center gap-1.5 pointer-events-auto">
+                  <div className={`absolute top-0 left-0 -translate-y-full bg-blue-600 text-white font-mono text-[9px] font-bold px-1.5 py-0.5 rounded-t shadow-md whitespace-nowrap flex items-center gap-1.5 ${draggedId ? 'pointer-events-none' : 'pointer-events-auto'}`}>
                     {/* Grip handle for visual Drag-and-Drop */}
                     <span 
                       draggable="true"
@@ -292,7 +293,7 @@ export function SelectionOverlay({
                           e.dataTransfer.effectAllowed = 'move';
                         }
                       }}
-                      className="cursor-grab active:cursor-grabbing hover:bg-blue-700 p-0.5 rounded transition-colors mr-1 flex items-center justify-center shrink-0 border border-blue-500/20"
+                      className={`cursor-grab active:cursor-grabbing hover:bg-blue-700/85 p-1.5 rounded transition-colors mr-1.5 flex items-center justify-center shrink-0 border border-blue-500/30 ${draggedId ? 'pointer-events-none' : 'pointer-events-auto'}`}
                       title="Arraste para reposicionar elemento"
                     >
                       <svg width="8" height="12" viewBox="0 0 8 12" fill="none" className="text-white opacity-80 hover:opacity-100">
@@ -315,41 +316,41 @@ export function SelectionOverlay({
 
                 {/* Discreet Figma Bounding Box Handles */}
                 <div 
-                  className="absolute w-1.5 h-1.5 bg-white border border-blue-600 rounded-sm -top-[3.5px] -left-[3.5px] pointer-events-auto cursor-nwse-resize" 
+                  className={`absolute w-1.5 h-1.5 bg-white border border-blue-600 rounded-sm -top-[3.5px] -left-[3.5px] cursor-nwse-resize ${draggedId ? 'pointer-events-none' : 'pointer-events-auto'}`} 
                   onMouseDown={(e) => { e.stopPropagation(); e.preventDefault(); onResizeStart?.('top-left', e); }}
                 />
                 <div 
-                  className="absolute w-1.5 h-1.5 bg-white border border-blue-600 rounded-sm -top-[3.5px] -right-[3.5px] pointer-events-auto cursor-nesw-resize" 
+                  className={`absolute w-1.5 h-1.5 bg-white border border-blue-600 rounded-sm -top-[3.5px] -right-[3.5px] cursor-nesw-resize ${draggedId ? 'pointer-events-none' : 'pointer-events-auto'}`} 
                   onMouseDown={(e) => { e.stopPropagation(); e.preventDefault(); onResizeStart?.('top-right', e); }}
                 />
                 <div 
-                  className="absolute w-1.5 h-1.5 bg-white border border-blue-600 rounded-sm -bottom-[3.5px] -left-[3.5px] pointer-events-auto cursor-nesw-resize" 
+                  className={`absolute w-1.5 h-1.5 bg-white border border-blue-600 rounded-sm -bottom-[3.5px] -left-[3.5px] cursor-nesw-resize ${draggedId ? 'pointer-events-none' : 'pointer-events-auto'}`} 
                   onMouseDown={(e) => { e.stopPropagation(); e.preventDefault(); onResizeStart?.('bottom-left', e); }}
                 />
                 <div 
-                  className="absolute w-1.5 h-1.5 bg-white border border-blue-600 rounded-sm -bottom-[3.5px] -right-[3.5px] pointer-events-auto cursor-nwse-resize" 
+                  className={`absolute w-1.5 h-1.5 bg-white border border-blue-600 rounded-sm -bottom-[3.5px] -right-[3.5px] cursor-nwse-resize ${draggedId ? 'pointer-events-none' : 'pointer-events-auto'}`} 
                   onMouseDown={(e) => { e.stopPropagation(); e.preventDefault(); onResizeStart?.('bottom-right', e); }}
                 />
                 
                 <div 
-                  className="absolute w-1.5 h-1.5 bg-white border border-blue-600 rounded-sm top-1/2 -left-[3.5px] -translate-y-1/2 pointer-events-auto cursor-ew-resize" 
+                  className={`absolute w-1.5 h-1.5 bg-white border border-blue-600 rounded-sm top-1/2 -left-[3.5px] -translate-y-1/2 cursor-ew-resize ${draggedId ? 'pointer-events-none' : 'pointer-events-auto'}`} 
                   onMouseDown={(e) => { e.stopPropagation(); e.preventDefault(); onResizeStart?.('left', e); }}
                 />
                 <div 
-                  className="absolute w-1.5 h-1.5 bg-white border border-blue-600 rounded-sm top-1/2 -right-[3.5px] -translate-y-1/2 pointer-events-auto cursor-ew-resize" 
+                  className={`absolute w-1.5 h-1.5 bg-white border border-blue-600 rounded-sm top-1/2 -right-[3.5px] -translate-y-1/2 cursor-ew-resize ${draggedId ? 'pointer-events-none' : 'pointer-events-auto'}`} 
                   onMouseDown={(e) => { e.stopPropagation(); e.preventDefault(); onResizeStart?.('right', e); }}
                 />
                 <div 
-                  className="absolute w-1.5 h-1.5 bg-white border border-blue-600 rounded-sm -top-[3.5px] left-1/2 -translate-x-1/2 pointer-events-auto cursor-ns-resize" 
+                  className={`absolute w-1.5 h-1.5 bg-white border border-blue-600 rounded-sm -top-[3.5px] left-1/2 -translate-x-1/2 cursor-ns-resize ${draggedId ? 'pointer-events-none' : 'pointer-events-auto'}`} 
                   onMouseDown={(e) => { e.stopPropagation(); e.preventDefault(); onResizeStart?.('top', e); }}
                 />
                 <div 
-                  className="absolute w-1.5 h-1.5 bg-white border border-blue-600 rounded-sm -bottom-[3.5px] left-1/2 -translate-x-1/2 pointer-events-auto cursor-ns-resize" 
+                  className={`absolute w-1.5 h-1.5 bg-white border border-blue-600 rounded-sm -bottom-[3.5px] left-1/2 -translate-x-1/2 cursor-ns-resize ${draggedId ? 'pointer-events-none' : 'pointer-events-auto'}`} 
                   onMouseDown={(e) => { e.stopPropagation(); e.preventDefault(); onResizeStart?.('bottom', e); }}
                 />
 
                 {/* Quick Action Floating Toolbar */}
-                <div className="absolute right-0 top-0 -translate-y-full flex gap-1 pointer-events-auto pb-1 z-30 font-sans">
+                <div className={`absolute right-0 top-0 -translate-y-full flex gap-1 pb-1 z-30 font-sans ${draggedId ? 'pointer-events-none' : 'pointer-events-auto'}`}>
                   {quickAction && (
                     <div className="flex bg-slate-900/90 backdrop-blur border border-slate-800 rounded-lg shadow-premium overflow-hidden text-[10px] text-slate-300 p-0.5">
                       <button

@@ -936,6 +936,18 @@ export default function App() {
       const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
       const cmdKey = isMac ? e.metaKey : e.ctrlKey;
 
+      // ⌘Z or Ctrl+Z - Undo
+      if (cmdKey && !e.shiftKey && e.key.toLowerCase() === 'z') {
+        e.preventDefault();
+        handleUndo();
+      }
+
+      // ⌘Shift+Z or ⌘Y or Ctrl+Y - Redo
+      if ((cmdKey && e.shiftKey && e.key.toLowerCase() === 'z') || (cmdKey && e.key.toLowerCase() === 'y')) {
+        e.preventDefault();
+        handleRedo();
+      }
+
       // ⌘K or Ctrl+K - Command Palette
       if (cmdKey && e.key.toLowerCase() === 'k') {
         e.preventDefault();
@@ -994,7 +1006,7 @@ export default function App() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedElementId, htmlContent, isCommandPaletteOpen]);
+  }, [selectedElementId, htmlContent, isCommandPaletteOpen, undoStack, redoStack]);
 
   const projectFileList = project ? Object.keys(project.files) : [];
 

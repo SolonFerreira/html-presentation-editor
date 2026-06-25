@@ -99,6 +99,11 @@ export function Canvas({
 
   // Drag and drop visual layout states
   const [draggedId, setDraggedId] = useState<string | null>(null);
+  const draggedIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    draggedIdRef.current = draggedId;
+  }, [draggedId]);
+
   const [dropTargetId, setDropTargetId] = useState<string | null>(null);
   const [dropPosition, setDropPosition] = useState<'before' | 'after' | 'inside'>('after');
   const [dropTargetRect, setDropTargetRect] = useState<Rect | null>(null);
@@ -700,9 +705,11 @@ export function Canvas({
         currentEl = currentEl.parentElement;
       }
 
-      if (targetId && draggedId && targetId !== draggedId) {
+      const activeDraggedId = draggedIdRef.current;
+
+      if (targetId && activeDraggedId && targetId !== activeDraggedId) {
         const targetEl = iframeDoc.querySelector(`[data-editor-id="${targetId}"]`) as HTMLElement;
-        const draggedEl = iframeDoc.querySelector(`[data-editor-id="${draggedId}"]`);
+        const draggedEl = iframeDoc.querySelector(`[data-editor-id="${activeDraggedId}"]`);
         
         if (targetEl && draggedEl && !draggedEl.contains(targetEl)) {
           const rect = targetEl.getBoundingClientRect();
@@ -730,15 +737,32 @@ export function Canvas({
             }
           }
 
-          setDropTargetId(targetId);
-          setDropPosition(position);
-          setDropTargetRect({
-            top: rect.top,
-            left: rect.left,
-            width: rect.width,
-            height: rect.height,
-            x: Math.round(rect.left - bodyRect.left),
-            y: Math.round(rect.top - bodyRect.top)
+          setDropTargetId(prevId => {
+            if (prevId !== targetId) return targetId;
+            return prevId;
+          });
+          setDropPosition(prevPos => {
+            if (prevPos !== position) return position;
+            return prevPos;
+          });
+          setDropTargetRect(prevRect => {
+            if (
+              !prevRect ||
+              prevRect.top !== rect.top ||
+              prevRect.left !== rect.left ||
+              prevRect.width !== rect.width ||
+              prevRect.height !== rect.height
+            ) {
+              return {
+                top: rect.top,
+                left: rect.left,
+                width: rect.width,
+                height: rect.height,
+                x: Math.round(rect.left - bodyRect.left),
+                y: Math.round(rect.top - bodyRect.top)
+              };
+            }
+            return prevRect;
           });
         } else {
           setDropTargetId(null);
@@ -759,8 +783,10 @@ export function Canvas({
       e.preventDefault();
       e.stopPropagation();
 
-      if (draggedId && dropTargetId && onMoveElementToLocation) {
-        onMoveElementToLocation(draggedId, dropTargetId, dropPosition);
+      const activeDraggedId = draggedIdRef.current;
+
+      if (activeDraggedId && dropTargetId && onMoveElementToLocation) {
+        onMoveElementToLocation(activeDraggedId, dropTargetId, dropPosition);
       }
 
       setDraggedId(null);
@@ -1023,7 +1049,7 @@ export function Canvas({
             const transformCombined = `${transformVal} scale(${scaleVal})`;
             return (
               <div
-                className="absolute pointer-events-auto z-40"
+                className={`absolute z-40 ${draggedId ? 'pointer-events-none' : 'pointer-events-auto'}`}
                 style={{
                   left: `${selectedRect.left + selectedRect.width / 2}px`,
                   top: `${topPos}px`,
