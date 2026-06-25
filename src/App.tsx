@@ -34,6 +34,7 @@ export default function App() {
     saveImage
   } = useFileSystem();
 
+  const [loadedProjectHandle, setLoadedProjectHandle] = useState<FileSystemDirectoryHandle | null>(null);
   const [activeHtmlPath, setActiveHtmlPath] = useState<string | null>(null);
   const [htmlContent, setHtmlContent] = useState<string>(''); // HTML containing data-editor-id
   
@@ -107,16 +108,21 @@ export default function App() {
     }
   };
 
-  // Auto-select index.html if it exists
+  // Auto-select index.html if it exists (only on initial project directory load)
   useEffect(() => {
     if (project) {
-      const files = Object.keys(project.files);
-      const indexFile = files.find(f => f.toLowerCase() === 'index.html') || files.find(f => f.endsWith('.html'));
-      if (indexFile) {
-        handleSelectFile(indexFile);
+      if (project.handle !== loadedProjectHandle) {
+        setLoadedProjectHandle(project.handle);
+        const files = Object.keys(project.files);
+        const indexFile = files.find(f => f.toLowerCase() === 'index.html') || files.find(f => f.endsWith('.html'));
+        if (indexFile) {
+          handleSelectFile(indexFile);
+        }
       }
+    } else {
+      setLoadedProjectHandle(null);
     }
-  }, [project]);
+  }, [project, loadedProjectHandle]);
 
   // Compute prepared sandbox HTML preview
   const previewHtml = useMemo(() => {
