@@ -8,7 +8,8 @@ import {
   injectEditorIds, 
   stripEditorIds, 
   generateSemanticTree, 
-  prepareHtmlForPreview 
+  prepareHtmlForPreview,
+  getMaxEditorId
 } from './utils/domHelper';
 import { executeAiEdit } from './utils/aiClient';
 import type { SemanticElement, ViewportMode, VersionEntry } from './types';
@@ -23,8 +24,17 @@ import {
   ZoomIn,
   ZoomOut,
   Undo2,
-  Redo2
+  Redo2,
+  Copy,
+  Trash2,
+  Lock,
+  Eye,
+  Maximize,
+  Layers,
+  Search
 } from 'lucide-react';
+import { CommandPalette } from './components/CommandPalette';
+import type { CommandItem } from './components/CommandPalette';
 
 export default function App() {
   const {
@@ -34,7 +44,6 @@ export default function App() {
     saveImage
   } = useFileSystem();
 
-  const [loadedProjectHandle, setLoadedProjectHandle] = useState<FileSystemDirectoryHandle | null>(null);
   const [activeHtmlPath, setActiveHtmlPath] = useState<string | null>(null);
   const [htmlContent, setHtmlContent] = useState<string>(''); // HTML containing data-editor-id
   
@@ -51,6 +60,7 @@ export default function App() {
   const [undoStack, setUndoStack] = useState<string[]>([]);
   const [redoStack, setRedoStack] = useState<string[]>([]);
   const [versionHistory, setVersionHistory] = useState<VersionEntry[]>([]);
+  const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
 
   // AI & API States
   const [apiKey, setApiKey] = useState(() => localStorage.getItem('gemini_api_key') || '');
@@ -110,19 +120,21 @@ export default function App() {
 
   // Auto-select index.html if it exists (only on initial project directory load)
   useEffect(() => {
-    if (project) {
-      if (project.handle !== loadedProjectHandle) {
-        setLoadedProjectHandle(project.handle);
-        const files = Object.keys(project.files);
-        const indexFile = files.find(f => f.toLowerCase() === 'index.html') || files.find(f => f.endsWith('.html'));
-        if (indexFile) {
-          handleSelectFile(indexFile);
-        }
+    if (project && !activeHtmlPath) {
+      const files = Object.keys(project.files);
+      const indexFile = files.find(f => f.toLowerCase() === 'index.html') || files.find(f => f.endsWith('.html'));
+      if (indexFile) {
+        handleSelectFile(indexFile);
       }
-    } else {
-      setLoadedProjectHandle(null);
     }
-  }, [project, loadedProjectHandle]);
+  }, [project, activeHtmlPath]);
+
+  const handleOpenDirectory = async () => {
+    setSelectedElementId(null);
+    setHoveredElementId(null);
+    setActiveHtmlPath(null);
+    await openDirectory();
+  };
 
   // Compute prepared sandbox HTML preview
   const previewHtml = useMemo(() => {
@@ -189,8 +201,15 @@ export default function App() {
     if (el) {
       const htmlEl = el as HTMLElement;
       Object.entries(styles).forEach(([key, value]) => {
-        if (key === 'src') {
-          htmlEl.setAttribute('src', value);
+        const attributeKeys = ['src', 'id', 'title', 'href', 'target', 'alt', 'role', 'aria-label'];
+        const isAttribute = attributeKeys.includes(key) || key.startsWith('aria-') || key.startsWith('data-');
+        
+        if (isAttribute) {
+          if (value === '') {
+            htmlEl.removeAttribute(key);
+          } else {
+            htmlEl.setAttribute(key, value);
+          }
         } else {
           htmlEl.style[key as any] = value;
         }
@@ -399,8 +418,9 @@ export default function App() {
     const el = doc.querySelector(`[data-editor-id="${elementId}"]`);
     if (el && el.parentElement) {
       const clone = el.cloneNode(true) as HTMLElement;
-      // Ingest new editor ids recursively for clean duplicate separation
-      const clonedHtml = injectEditorIds(clone.outerHTML);
+      // Ingest new editor ids recursively starting from max + 1
+      const startId = getMaxEditorId(htmlContent) + 1;
+      const clonedHtml = injectEditorIds(clone.outerHTML, startId);
       const parsedCloneDoc = parser.parseFromString(clonedHtml, 'text/html');
       const cleanClone = parsedCloneDoc.body.firstElementChild;
       
@@ -437,13 +457,29 @@ export default function App() {
     }
   };
 
+  const handleMoveElement = async (draggedId: string, targetId: string) => {
+    if (draggedId === targetId) return;
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(htmlContent, 'text/html');
+    const draggedEl = doc.querySelector(`[data-editor-id="${draggedId}"]`);
+    const targetEl = doc.querySelector(`[data-editor-id="${targetId}"]`);
+    
+    if (draggedEl && targetEl && targetEl.parentElement) {
+      if (draggedEl.contains(targetEl)) return; // Prevent infinite cycle
+      const parent = targetEl.parentElement;
+      parent.insertBefore(draggedEl, targetEl);
+      await updateHtml(doc.documentElement.outerHTML, `Moveu elemento ${draggedEl.tagName.toLowerCase()}`);
+    }
+  };
+
   // INJECT PRE-DESIGNED PREMIUM COMPONENT
   const handleInsertComponent = async (htmlSnippet: string) => {
     const parser = new DOMParser();
     const doc = parser.parseFromString(htmlContent, 'text/html');
     
-    // Parse the snippet and inject editor IDs recursively
-    const snippetWithIds = injectEditorIds(htmlSnippet);
+    // Parse the snippet and inject editor IDs starting from max + 1
+    const startId = getMaxEditorId(htmlContent) + 1;
+    const snippetWithIds = injectEditorIds(htmlSnippet, startId);
     const parsedSnippetDoc = parser.parseFromString(snippetWithIds, 'text/html');
     const cleanSnippet = parsedSnippetDoc.body.firstElementChild;
 
@@ -478,7 +514,234 @@ export default function App() {
     URL.revokeObjectURL(url);
   };
 
+  // Group element under a styled div container
+  const handleGroupElement = async (elementId: string) => {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(htmlContent, 'text/html');
+    const el = doc.querySelector(`[data-editor-id="${elementId}"]`);
+    if (el && el.parentElement) {
+      const parent = el.parentElement;
+      const groupDiv = doc.createElement('div');
+      const startId = getMaxEditorId(htmlContent) + 1;
+      groupDiv.setAttribute('data-editor-id', `el-${startId}`);
+      groupDiv.setAttribute('data-editor-label', 'Grupo');
+      groupDiv.style.display = 'block';
+      groupDiv.style.border = '1px dashed rgba(255, 255, 255, 0.15)';
+      groupDiv.style.padding = '12px';
+      groupDiv.style.borderRadius = '8px';
+      
+      parent.insertBefore(groupDiv, el);
+      groupDiv.appendChild(el);
+      
+      await updateHtml(doc.documentElement.outerHTML, `Agrupou elemento`);
+      setSelectedElementId(`el-${startId}`);
+    }
+  };
+
+  // Keyboard Shortcuts listener
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const activeEl = document.activeElement;
+      const isEditable = activeEl && (
+        activeEl.tagName === 'INPUT' || 
+        activeEl.tagName === 'TEXTAREA' || 
+        activeEl.tagName === 'SELECT' || 
+        activeEl.hasAttribute('contenteditable') ||
+        (activeEl as HTMLElement).isContentEditable
+      );
+
+      if (isEditable && e.key !== 'Escape') return;
+
+      const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+      const cmdKey = isMac ? e.metaKey : e.ctrlKey;
+
+      // ⌘K or Ctrl+K - Command Palette
+      if (cmdKey && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setIsCommandPaletteOpen(prev => !prev);
+      }
+
+      // ⌘D or Ctrl+D - Duplicate
+      if (cmdKey && e.key.toLowerCase() === 'd') {
+        e.preventDefault();
+        if (selectedElementId) {
+          handleDuplicateElement(selectedElementId);
+        }
+      }
+
+      // ⌘/ or Ctrl+/ - Search layers (focus search input)
+      if (cmdKey && e.key === '/') {
+        e.preventDefault();
+        const searchInput = document.querySelector('input[placeholder*="Buscar"]') as HTMLInputElement;
+        if (searchInput) {
+          searchInput.focus();
+        }
+      }
+
+      // Delete or Backspace - Delete element
+      if ((e.key === 'Delete' || e.key === 'Backspace') && !isEditable) {
+        if (selectedElementId) {
+          e.preventDefault();
+          handleDeleteElement(selectedElementId);
+        }
+      }
+
+      // Esc - Clear selection / Close Palette
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        if (isCommandPaletteOpen) {
+          setIsCommandPaletteOpen(false);
+        } else {
+          setSelectedElementId(null);
+        }
+      }
+
+      // F - Zoom fit (100%)
+      if (e.key.toLowerCase() === 'f' && !isEditable) {
+        e.preventDefault();
+        setZoomScale(1.0);
+      }
+
+      // ⌘G or Ctrl+G - Group elements
+      if (cmdKey && e.key.toLowerCase() === 'g') {
+        e.preventDefault();
+        if (selectedElementId) {
+          handleGroupElement(selectedElementId);
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedElementId, htmlContent, isCommandPaletteOpen]);
+
   const projectFileList = project ? Object.keys(project.files) : [];
+
+  const commandPaletteCommands = useMemo<CommandItem[]>(() => {
+    return [
+      {
+        id: 'duplicate',
+        name: 'Duplicar Elemento Selecionado',
+        category: 'Ações do Elemento',
+        shortcut: '⌘D',
+        icon: <Copy className="w-3.5 h-3.5" />,
+        action: () => {
+          if (selectedElementId) handleDuplicateElement(selectedElementId);
+        }
+      },
+      {
+        id: 'delete',
+        name: 'Excluir Elemento Selecionado',
+        category: 'Ações do Elemento',
+        shortcut: 'Delete',
+        icon: <Trash2 className="w-3.5 h-3.5" />,
+        action: () => {
+          if (selectedElementId) handleDeleteElement(selectedElementId);
+        }
+      },
+      {
+        id: 'lock',
+        name: 'Bloquear / Desbloquear Elemento',
+        category: 'Ações do Elemento',
+        icon: <Lock className="w-3.5 h-3.5" />,
+        action: () => {
+          if (selectedElementId) handleToggleLock(selectedElementId);
+        }
+      },
+      {
+        id: 'hide',
+        name: 'Ocultar / Exibir Elemento',
+        category: 'Ações do Elemento',
+        icon: <Eye className="w-3.5 h-3.5" />,
+        action: () => {
+          if (selectedElementId) handleToggleHide(selectedElementId);
+        }
+      },
+      {
+        id: 'group',
+        name: 'Agrupar Elemento',
+        category: 'Ações do Elemento',
+        shortcut: '⌘G',
+        icon: <Layers className="w-3.5 h-3.5" />,
+        action: () => {
+          if (selectedElementId) handleGroupElement(selectedElementId);
+        }
+      },
+      {
+        id: 'viewport-desktop',
+        name: 'Alternar para Viewport Desktop',
+        category: 'Viewports',
+        icon: <Monitor className="w-3.5 h-3.5" />,
+        action: () => setViewportMode('desktop')
+      },
+      {
+        id: 'viewport-tablet',
+        name: 'Alternar para Viewport Tablet',
+        category: 'Viewports',
+        icon: <Tablet className="w-3.5 h-3.5" />,
+        action: () => setViewportMode('tablet')
+      },
+      {
+        id: 'viewport-mobile',
+        name: 'Alternar para Viewport Mobile',
+        category: 'Viewports',
+        icon: <Smartphone className="w-3.5 h-3.5" />,
+        action: () => setViewportMode('mobile')
+      },
+      {
+        id: 'zoom-in',
+        name: 'Aumentar Zoom (Zoom In)',
+        category: 'Comandos',
+        icon: <ZoomIn className="w-3.5 h-3.5" />,
+        action: () => setZoomScale(prev => Math.min(2.0, prev + 0.1))
+      },
+      {
+        id: 'zoom-out',
+        name: 'Diminuir Zoom (Zoom Out)',
+        category: 'Comandos',
+        icon: <ZoomOut className="w-3.5 h-3.5" />,
+        action: () => setZoomScale(prev => Math.max(0.5, prev - 0.1))
+      },
+      {
+        id: 'zoom-fit',
+        name: 'Ajustar Zoom (Fit 100%)',
+        category: 'Comandos',
+        shortcut: 'F',
+        icon: <Maximize className="w-3.5 h-3.5" />,
+        action: () => setZoomScale(1.0)
+      },
+      {
+        id: 'undo',
+        name: 'Desfazer Última Alteração',
+        category: 'Comandos',
+        shortcut: '⌘Z',
+        icon: <Undo2 className="w-3.5 h-3.5" />,
+        action: handleUndo
+      },
+      {
+        id: 'redo',
+        name: 'Refazer Ação',
+        category: 'Comandos',
+        shortcut: '⌘Y',
+        icon: <Redo2 className="w-3.5 h-3.5" />,
+        action: handleRedo
+      },
+      {
+        id: 'export',
+        name: 'Exportar HTML Local',
+        category: 'Projeto',
+        icon: <Download className="w-3.5 h-3.5" />,
+        action: handleManualExport
+      },
+      {
+        id: 'import',
+        name: 'Importar Pasta de Projeto',
+        category: 'Projeto',
+        icon: <FolderOpen className="w-3.5 h-3.5" />,
+        action: handleOpenDirectory
+      }
+    ];
+  }, [selectedElementId, htmlContent, undoStack, redoStack]);
 
   // Toggle Presentation Mode Fullscreen Esc handler
   useEffect(() => {
@@ -498,18 +761,33 @@ export default function App() {
       <header className="h-12 bg-slate-900 border-b border-slate-800 flex items-center justify-between px-4 shrink-0 z-40">
         
         {/* Left Side: Brand Logo */}
-        <div className="flex items-center gap-2.5">
-          <div className="w-6.5 h-6.5 rounded-md bg-blue-600 flex items-center justify-center shadow-lg shadow-blue-500/25">
-            <Sparkles className="w-3.5 h-3.5 text-white" />
-          </div>
-          <div>
-            <span className="text-xs font-bold text-white tracking-tight flex items-center gap-1.5">
-              STRAT Editor
-              <span className="text-[8px] bg-blue-600/20 text-blue-400 border border-blue-500/20 px-1 py-0.5 rounded font-black tracking-wider uppercase">
-                Pro
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2.5">
+            <div className="w-6.5 h-6.5 rounded-md bg-blue-600 flex items-center justify-center shadow-lg shadow-blue-500/25">
+              <Sparkles className="w-3.5 h-3.5 text-white" />
+            </div>
+            <div>
+              <span className="text-xs font-bold text-white tracking-tight flex items-center gap-1.5">
+                STRAT Editor
+                <span className="text-[8px] bg-blue-600/20 text-blue-400 border border-blue-500/20 px-1 py-0.5 rounded font-black tracking-wider uppercase">
+                  Pro
+                </span>
               </span>
-            </span>
+            </div>
           </div>
+
+          {!presentationMode && (
+            <button
+              onClick={() => setIsCommandPaletteOpen(true)}
+              className="flex items-center gap-2 bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1 text-slate-500 hover:text-slate-350 text-xs transition-all cursor-pointer shadow-inner hover:border-slate-700/60"
+            >
+              <Search className="w-3 h-3 text-slate-500" />
+              <span>Command Palette</span>
+              <span className="text-[9px] bg-slate-900 border border-slate-850 px-1 rounded font-mono text-slate-400">
+                ⌘K
+              </span>
+            </button>
+          )}
         </div>
 
         {/* Center: Device Selectors & Zoom Scaling Controls */}
@@ -607,7 +885,7 @@ export default function App() {
           {/* Import / Export & Play Buttons */}
           <div className="flex items-center gap-1.5">
             <button
-              onClick={openDirectory}
+              onClick={handleOpenDirectory}
               className="flex items-center gap-1.5 bg-slate-950 border border-slate-850 hover:bg-slate-800 text-slate-300 text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors cursor-pointer"
             >
               <FolderOpen className="w-3.5 h-3.5 text-blue-500" />
@@ -667,6 +945,7 @@ export default function App() {
             onDeleteElement={handleDeleteElement}
             onReorderElement={handleReorderElement}
             onRenameElement={handleRenameElement}
+            onMoveElement={handleMoveElement}
             onInsertComponent={handleInsertComponent}
             versionHistory={versionHistory}
             onRollbackVersion={handleRollbackVersion}
@@ -685,6 +964,7 @@ export default function App() {
           onQuickFontChange={handleQuickFontChange}
           
           zoomScale={zoomScale}
+          onZoomChange={setZoomScale}
           viewportMode={viewportMode}
           presentationMode={presentationMode}
         />
@@ -720,6 +1000,13 @@ export default function App() {
           />
         )}
 
+        <CommandPalette
+          isOpen={isCommandPaletteOpen}
+          onClose={() => setIsCommandPaletteOpen(false)}
+          commands={commandPaletteCommands}
+          semanticTree={semanticTree}
+          onSelectElement={setSelectedElementId}
+        />
       </div>
     </div>
   );

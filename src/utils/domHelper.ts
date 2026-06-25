@@ -3,11 +3,11 @@ import type { FileItem, SemanticElement } from '../types';
 /**
  * Injects temporary `data-editor-id` attributes to all elements in the HTML body
  */
-export function injectEditorIds(htmlContent: string): string {
+export function injectEditorIds(htmlContent: string, startId = 1): string {
   const parser = new DOMParser();
   const doc = parser.parseFromString(htmlContent, 'text/html');
   
-  let idCounter = 1;
+  let idCounter = startId;
   const traverse = (element: Element) => {
     // Only assign editor IDs to elements inside body and skip script/style tags
     if (element.tagName !== 'SCRIPT' && element.tagName !== 'STYLE' && element.tagName !== 'HEAD' && element.tagName !== 'HTML') {
@@ -21,6 +21,35 @@ export function injectEditorIds(htmlContent: string): string {
   }
   
   return doc.documentElement.outerHTML;
+}
+
+/**
+ * Scans the HTML content for the maximum editor ID and returns the number.
+ */
+export function getMaxEditorId(htmlContent: string): number {
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(htmlContent, 'text/html');
+  let max = 0;
+  
+  const scan = (element: Element) => {
+    const editorId = element.getAttribute('data-editor-id');
+    if (editorId) {
+      const match = editorId.match(/^el-(\d+)$/);
+      if (match) {
+        const idNum = parseInt(match[1], 10);
+        if (idNum > max) {
+          max = idNum;
+        }
+      }
+    }
+    Array.from(element.children).forEach(scan);
+  };
+
+  if (doc.body) {
+    scan(doc.body);
+  }
+
+  return max;
 }
 
 /**
@@ -125,6 +154,15 @@ export function generateSemanticTree(rootElement: Element): SemanticElement[] {
       text = element.textContent.trim().substring(0, 100);
     }
 
+    const capturedAttributes: Record<string, string> = {};
+    const attrsToCapture = ['id', 'title', 'href', 'target', 'alt', 'role', 'aria-label'];
+    attrsToCapture.forEach(attrName => {
+      const val = element.getAttribute(attrName);
+      if (val !== null && attrName !== 'data-editor-id') {
+        capturedAttributes[attrName] = val;
+      }
+    });
+
     const node: SemanticElement = {
       id: editorId,
       tagName: element.tagName,
@@ -132,10 +170,12 @@ export function generateSemanticTree(rootElement: Element): SemanticElement[] {
       text,
       classes: Array.from(element.classList),
       style: inlineStyle,
+      attributes: capturedAttributes,
       children: [],
       xpath: getElementXPath(element),
       isLocked: element.getAttribute('data-editor-locked') === 'true',
-      isHidden: element.getAttribute('data-editor-hidden') === 'true'
+      isHidden: element.getAttribute('data-editor-hidden') === 'true',
+      label: element.getAttribute('data-editor-label') || undefined
     };
 
     parentList.push(node);

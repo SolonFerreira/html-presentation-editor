@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import type { SemanticElement } from '../types';
 import { 
   Folder, 
@@ -16,12 +16,13 @@ import {
   Unlock,
   Copy,
   Trash2,
-  ArrowUp,
-  ArrowDown,
   Layers,
   Grid,
   History,
-  Plus
+  Plus,
+  Search,
+  Maximize2,
+  Minimize2
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -34,13 +35,14 @@ interface SidebarProps {
   activeFile: string | null;
   onSelectFile: (path: string) => void;
   
-  // New actions for Layers Panel
+  // Actions for Layers Panel
   onToggleLock: (id: string) => void;
   onToggleHide: (id: string) => void;
   onDuplicateElement: (id: string) => void;
   onDeleteElement: (id: string) => void;
   onReorderElement: (id: string, direction: 'up' | 'down') => void;
   onRenameElement: (id: string, newName: string) => void;
+  onMoveElement?: (draggedId: string, targetId: string) => void;
 
   // Insert component from library
   onInsertComponent: (htmlSnippet: string) => void;
@@ -51,6 +53,7 @@ interface SidebarProps {
 }
 
 type TabType = 'layers' | 'components' | 'history';
+type FilterMode = 'all' | 'hidden' | 'locked' | 'selected';
 
 // Component Library snippets definitions
 const COMPONENT_LIBRARY = [
@@ -141,6 +144,37 @@ const COMPONENT_LIBRARY = [
   }
 ];
 
+// Helper to determine friendly semantic names instead of raw tags
+export function getFriendlyNodeName(node: SemanticElement): string {
+  if (node.label) return node.label;
+  
+  const tag = node.tagName.toLowerCase();
+  const classes = node.classes.map(c => c.toLowerCase());
+  const hasClass = (term: string) => classes.some(c => c.includes(term));
+  
+  if (hasClass('hero')) return 'Hero Section';
+  if (hasClass('nav') || hasClass('navbar') || tag === 'nav') return 'Navigation';
+  if (hasClass('footer') || tag === 'footer') return 'Footer';
+  if (hasClass('card') || hasClass('metric-card')) return 'Metric Card';
+  if (hasClass('metrics-grid')) return 'Feature Grid';
+  if (hasClass('btn') || hasClass('button') || tag === 'button') return 'CTA Button';
+  if (hasClass('faq') || hasClass('accordion')) return 'FAQ Accordion';
+  if (hasClass('timeline') || hasClass('roadmap')) return 'Roadmap Timeline';
+  if (hasClass('badge')) return 'Badge Indicator';
+  
+  if (tag === 'h1') return 'Main Title (H1)';
+  if (tag === 'h2') return 'Section Title (H2)';
+  if (tag === 'h3') return 'Subtitle (H3)';
+  if (tag === 'p') return 'Paragraph';
+  if (tag === 'span') return 'Label Text';
+  if (tag === 'img') return 'Image Asset';
+  if (tag === 'section') return 'Section Wrapper';
+  if (tag === 'header') return 'Header';
+  if (tag === 'aside') return 'Sidebar';
+  
+  return tag + (node.classes.length > 0 ? `.${node.classes[0]}` : '');
+}
+
 export function Sidebar({
   semanticTree,
   selectedElementId,
@@ -155,8 +189,8 @@ export function Sidebar({
   onToggleHide,
   onDuplicateElement,
   onDeleteElement,
-  onReorderElement,
   onRenameElement,
+  onMoveElement,
 
   onInsertComponent,
 
@@ -167,6 +201,28 @@ export function Sidebar({
   const [collapsedNodes, setCollapsedNodes] = useState<Record<string, boolean>>({});
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
+  
+  // Search & Filters state
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filterMode, setFilterMode] = useState<FilterMode>('all');
+  
+  // Drag Over state
+  const [dragOverId, setDragOverId] = useState<string | null>(null);
+  
+  // Context Menu state
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; nodeId: string } | null>(null);
+  const contextMenuRef = useRef<HTMLDivElement>(null);
+
+  // Close context menu on outside click
+  useEffect(() => {
+    const handleOutsideClick = (e: MouseEvent) => {
+      if (contextMenu && contextMenuRef.current && !contextMenuRef.current.contains(e.target as Node)) {
+        setContextMenu(null);
+      }
+    };
+    window.addEventListener('click', handleOutsideClick);
+    return () => window.removeEventListener('click', handleOutsideClick);
+  }, [contextMenu]);
 
   const toggleCollapse = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -177,6 +233,7 @@ export function Sidebar({
     e.stopPropagation();
     setRenamingId(id);
     setRenameValue(currentVal);
+    setContextMenu(null);
   };
 
   const handleRenameSubmit = (id: string) => {
@@ -198,26 +255,128 @@ export function Sidebar({
     }
   };
 
+  // Check if a node is visible based on search and filters
+  const isNodeVisible = (node: SemanticElement): boolean => {
+    const friendlyName = getFriendlyNodeName(node);
+    const matchesSearch = friendlyName.toLowerCase().includes(searchQuery.toLowerCase()) || 
+      node.id.toLowerCase().includes(searchQuery.toLowerCase());
+    
+    let matchesFilter = true;
+    if (filterMode === 'locked') matchesFilter = !!node.isLocked;
+    else if (filterMode === 'hidden') matchesFilter = !!node.isHidden;
+    else if (filterMode === 'selected') matchesFilter = node.id === selectedElementId;
+    
+    if (matchesSearch && matchesFilter) return true;
+    
+    if (node.children && node.children.length > 0) {
+      return node.children.some(isNodeVisible);
+    }
+    
+    return false;
+  };
+
+  // Expand / Collapse all logic
+  const getAllParentIds = (nodes: SemanticElement[]): string[] => {
+    const ids: string[] = [];
+    const traverse = (node: SemanticElement) => {
+      if (node.children && node.children.length > 0) {
+        ids.push(node.id);
+        node.children.forEach(traverse);
+      }
+    };
+    nodes.forEach(traverse);
+    return ids;
+  };
+
+  const handleExpandAll = () => {
+    setCollapsedNodes({});
+  };
+
+  const handleCollapseAll = () => {
+    const allParentIds = getAllParentIds(semanticTree);
+    const collapsedMap: Record<string, boolean> = {};
+    allParentIds.forEach(id => {
+      collapsedMap[id] = true;
+    });
+    setCollapsedNodes(collapsedMap);
+  };
+
+  // Find selected element lineage for breadcrumbs
+  const getSelectedLineage = (nodes: SemanticElement[], targetId: string, currentPath: SemanticElement[] = []): SemanticElement[] | null => {
+    for (const node of nodes) {
+      const newPath = [...currentPath, node];
+      if (node.id === targetId) return newPath;
+      if (node.children && node.children.length > 0) {
+        const found = getSelectedLineage(node.children, targetId, newPath);
+        if (found) return found;
+      }
+    }
+    return null;
+  };
+
+  // Render tree item recursively
   const renderLayerItem = (node: SemanticElement, depth = 0) => {
+    if (!isNodeVisible(node)) return null;
+
     const isSelected = selectedElementId === node.id;
     const isHovered = hoveredElementId === node.id;
     const isCollapsed = !!collapsedNodes[node.id];
     const hasChildren = node.children && node.children.length > 0;
     const isRenameActive = renamingId === node.id;
+    const isDragOver = dragOverId === node.id;
 
-    const friendlyName = node.tagName.toLowerCase() + (node.classes.length > 0 ? `.${node.classes[0]}` : '');
+    const friendlyName = getFriendlyNodeName(node);
 
     return (
-      <div key={node.id} className="w-full">
+      <div 
+        key={node.id} 
+        className="w-full relative"
+        draggable={!node.isLocked && !isRenameActive}
+        onDragStart={(e) => {
+          e.dataTransfer.setData('text/plain', node.id);
+          e.stopPropagation();
+        }}
+        onDragOver={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          if (dragOverId !== node.id) setDragOverId(node.id);
+        }}
+        onDragLeave={() => {
+          setDragOverId(null);
+        }}
+        onDrop={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          setDragOverId(null);
+          const draggedId = e.dataTransfer.getData('text/plain');
+          if (draggedId && onMoveElement) {
+            onMoveElement(draggedId, node.id);
+          }
+        }}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          setContextMenu({
+            x: e.clientX,
+            y: e.clientY,
+            nodeId: node.id
+          });
+        }}
+      >
+        {/* Drop Insertion indicator */}
+        {isDragOver && (
+          <div className="absolute top-0 left-0 right-0 h-0.5 bg-blue-500 z-10 pointer-events-none" />
+        )}
+
         <div
           className={`flex items-center px-2 py-1 mx-1 rounded cursor-pointer transition-all duration-100 group relative border ${
             isSelected 
-              ? 'bg-blue-600/20 border-blue-500/30 text-blue-200' 
+              ? 'bg-blue-600/20 border-blue-500/30 text-blue-200 shadow-inner' 
               : isHovered 
-                ? 'bg-slate-800/60 border-slate-700/50 text-slate-100' 
+                ? 'bg-slate-800/50 border-slate-700/50 text-slate-100' 
                 : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-800/30'
           }`}
-          style={{ paddingLeft: `${depth * 8 + 6}px` }}
+          style={{ paddingLeft: `${depth * 10 + 6}px` }}
           onClick={(e) => {
             e.stopPropagation();
             onSelectElement(node.id);
@@ -225,10 +384,10 @@ export function Sidebar({
           onMouseEnter={() => onHoverElement(node.id)}
           onMouseLeave={() => onHoverElement(null)}
         >
-          {/* Collapse Indicator */}
+          {/* Collapse Arrow */}
           <span 
             onClick={(e) => hasChildren && toggleCollapse(node.id, e)}
-            className={`mr-1 p-0.5 hover:bg-slate-700/50 rounded opacity-60 transition-colors ${hasChildren ? 'cursor-pointer' : 'opacity-0 pointer-events-none'}`}
+            className={`mr-1 p-0.5 hover:bg-slate-700/40 rounded opacity-60 transition-colors ${hasChildren ? 'cursor-pointer' : 'opacity-0 pointer-events-none'}`}
           >
             {hasChildren 
               ? (isCollapsed ? <ChevronRight className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />) 
@@ -254,76 +413,39 @@ export function Sidebar({
                 }}
                 onClick={(e) => e.stopPropagation()}
                 autoFocus
-                className="bg-slate-950 border border-blue-500 rounded px-1 text-xs text-white focus:outline-none w-full py-0.5"
+                className="bg-slate-950 border border-blue-500 rounded px-1 text-xs text-white focus:outline-none w-full py-0.5 font-sans"
               />
             ) : (
               <span 
                 onDoubleClick={(e) => startRename(node.id, friendlyName, e)}
-                className={`text-xs truncate block font-mono ${node.isHidden ? 'line-through opacity-40' : ''}`}
-                title="Double click to rename layer"
+                className={`text-xs truncate block font-medium tracking-tight ${node.isHidden ? 'line-through opacity-30' : ''}`}
+                title="Dê duplo clique para renomear"
               >
                 {friendlyName}
               </span>
             )}
           </div>
 
-          {/* Actions panel visible on hover / active */}
-          <div className={`flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity bg-slate-900/90 rounded border border-slate-700/40 px-1 py-0.5 shrink-0 ${isSelected ? 'opacity-100' : ''}`}>
+          {/* Hover Indicators panel */}
+          <div className={`flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity bg-slate-900/90 rounded border border-slate-800/80 px-1 py-0.5 shrink-0 ${isSelected ? 'opacity-100' : ''}`}>
             
-            {/* Lock toggle */}
+            {/* Lock */}
             <button
               onClick={(e) => { e.stopPropagation(); onToggleLock(node.id); }}
-              className={`p-0.5 rounded hover:bg-slate-700/50 ${node.isLocked ? 'text-amber-400' : 'text-slate-500 hover:text-slate-300'}`}
-              title={node.isLocked ? 'Desbloquear Elemento' : 'Bloquear Elemento'}
+              className={`p-0.5 rounded hover:bg-slate-850 ${node.isLocked ? 'text-amber-500' : 'text-slate-500 hover:text-slate-300'}`}
+              title={node.isLocked ? 'Desbloquear' : 'Bloquear'}
             >
               {node.isLocked ? <Lock className="w-3 h-3" /> : <Unlock className="w-3 h-3" />}
             </button>
 
-            {/* Visibility toggle */}
+            {/* Hide */}
             <button
               onClick={(e) => { e.stopPropagation(); onToggleHide(node.id); }}
-              className={`p-0.5 rounded hover:bg-slate-700/50 ${node.isHidden ? 'text-blue-400' : 'text-slate-500 hover:text-slate-300'}`}
+              className={`p-0.5 rounded hover:bg-slate-850 ${node.isHidden ? 'text-blue-500' : 'text-slate-500 hover:text-slate-300'}`}
               title={node.isHidden ? 'Exibir' : 'Ocultar'}
             >
               {node.isHidden ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
             </button>
-
-            {/* Reorder Up */}
-            <button
-              onClick={(e) => { e.stopPropagation(); onReorderElement(node.id, 'up'); }}
-              className="p-0.5 rounded hover:bg-slate-700/50 text-slate-500 hover:text-slate-300"
-              title="Subir Camada"
-            >
-              <ArrowUp className="w-3 h-3" />
-            </button>
-
-            {/* Reorder Down */}
-            <button
-              onClick={(e) => { e.stopPropagation(); onReorderElement(node.id, 'down'); }}
-              className="p-0.5 rounded hover:bg-slate-700/50 text-slate-500 hover:text-slate-300"
-              title="Descer Camada"
-            >
-              <ArrowDown className="w-3 h-3" />
-            </button>
-
-            {/* Duplicate */}
-            <button
-              onClick={(e) => { e.stopPropagation(); onDuplicateElement(node.id); }}
-              className="p-0.5 rounded hover:bg-slate-700/50 text-slate-500 hover:text-slate-300"
-              title="Duplicar"
-            >
-              <Copy className="w-3 h-3" />
-            </button>
-
-            {/* Delete */}
-            <button
-              onClick={(e) => { e.stopPropagation(); onDeleteElement(node.id); }}
-              className="p-0.5 rounded hover:bg-red-950/40 text-slate-500 hover:text-red-400"
-              title="Excluir"
-            >
-              <Trash2 className="w-3 h-3" />
-            </button>
-
           </div>
         </div>
 
@@ -339,21 +461,21 @@ export function Sidebar({
   const htmlFiles = files.filter(f => f.endsWith('.html'));
 
   return (
-    <aside className="w-64 bg-slate-900 border-r border-slate-800 flex flex-col h-full overflow-hidden select-none shrink-0">
+    <aside className="w-64 bg-slate-900/90 backdrop-blur-md border-r border-slate-800 flex flex-col h-full overflow-hidden select-none shrink-0 relative">
       
-      {/* Files Navigator Header */}
-      <div className="p-3 border-b border-slate-800 shrink-0">
+      {/* 1. Files Navigator Header */}
+      <div className="p-3 border-b border-slate-800 shrink-0 bg-slate-950/20">
         <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-1.5">
-          Arquivos da Apresentação
+          Arquivos
         </span>
         <div className="space-y-0.5">
           {htmlFiles.map(file => (
             <div
               key={file}
               onClick={() => onSelectFile(file)}
-              className={`flex items-center px-2 py-1 rounded text-xs font-semibold cursor-pointer transition-all ${
+              className={`flex items-center px-2.5 py-1.5 rounded-lg text-xs font-medium cursor-pointer transition-all ${
                 activeFile === file
-                  ? 'bg-blue-600/20 text-blue-200 border border-blue-500/30'
+                  ? 'bg-blue-600/15 text-blue-200 border border-blue-500/20 shadow-inner'
                   : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40 border border-transparent'
               }`}
             >
@@ -364,7 +486,7 @@ export function Sidebar({
         </div>
       </div>
 
-      {/* Tabs Switcher Navigation */}
+      {/* 2. Tabs Switcher */}
       <div className="flex border-b border-slate-800 bg-slate-950/40 shrink-0">
         <button
           onClick={() => setActiveTab('layers')}
@@ -401,10 +523,75 @@ export function Sidebar({
         </button>
       </div>
 
-      {/* Content Container based on Active Tab */}
+      {/* 3. Global controls (expand/collapse) visible when in layers tab */}
+      {activeTab === 'layers' && (
+        <div className="px-3 py-1.5 bg-slate-950/20 border-b border-slate-800 flex justify-between items-center shrink-0">
+          <span className="text-[9px] font-bold text-slate-500 uppercase tracking-wide">
+            Camadas do slide
+          </span>
+          <div className="flex items-center gap-2">
+            <button 
+              onClick={handleExpandAll}
+              className="p-1 hover:bg-slate-800 rounded text-slate-500 hover:text-slate-300 cursor-pointer"
+              title="Expandir Tudo"
+            >
+              <Maximize2 className="w-3 h-3" />
+            </button>
+            <button 
+              onClick={handleCollapseAll}
+              className="p-1 hover:bg-slate-800 rounded text-slate-500 hover:text-slate-300 cursor-pointer"
+              title="Recolher Tudo"
+            >
+              <Minimize2 className="w-3 h-3" />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* 4. Search and Filters */}
+      {activeTab === 'layers' && (
+        <div className="px-3 py-2 border-b border-slate-800/60 bg-slate-950/10 space-y-1.5 shrink-0">
+          <div className="relative">
+            <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-600" />
+            <input
+              type="text"
+              placeholder="Buscar camada... (Cmd+/)"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full bg-slate-950 border border-slate-800 rounded-lg pl-8 pr-2.5 py-1 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:ring-1 focus:ring-blue-500/50"
+            />
+          </div>
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={() => setFilterMode('all')}
+              className={`px-2 py-0.5 rounded text-[9px] font-bold transition-all cursor-pointer border ${filterMode === 'all' ? 'bg-slate-800 border-slate-700 text-slate-200' : 'border-transparent text-slate-500 hover:text-slate-300'}`}
+            >
+              Tudo
+            </button>
+            <button
+              onClick={() => setFilterMode('selected')}
+              className={`px-2 py-0.5 rounded text-[9px] font-bold transition-all cursor-pointer border ${filterMode === 'selected' ? 'bg-blue-600/10 border-blue-500/25 text-blue-400' : 'border-transparent text-slate-500 hover:text-slate-350'}`}
+            >
+              Foco
+            </button>
+            <button
+              onClick={() => setFilterMode('locked')}
+              className={`px-2 py-0.5 rounded text-[9px] font-bold transition-all cursor-pointer border ${filterMode === 'locked' ? 'bg-amber-600/10 border-amber-500/25 text-amber-500' : 'border-transparent text-slate-500 hover:text-slate-350'}`}
+            >
+              Bloqueados
+            </button>
+            <button
+              onClick={() => setFilterMode('hidden')}
+              className={`px-2 py-0.5 rounded text-[9px] font-bold transition-all cursor-pointer border ${filterMode === 'hidden' ? 'bg-blue-500/10 border-blue-500/20 text-blue-400 line-through' : 'border-transparent text-slate-500 hover:text-slate-350'}`}
+            >
+              Ocultos
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* 5. Main content layers tree */}
       <div className="flex-1 overflow-y-auto">
-        
-        {/* TAB 1: LAYERS TREE VIEW */}
         {activeTab === 'layers' && (
           <div className="p-2 space-y-0.5">
             {semanticTree.length === 0 ? (
@@ -415,7 +602,7 @@ export function Sidebar({
           </div>
         )}
 
-        {/* TAB 2: COMPONENT LIBRARY */}
+        {/* Tab 2 Library */}
         {activeTab === 'components' && (
           <div className="p-3 space-y-3">
             <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">
@@ -449,7 +636,7 @@ export function Sidebar({
           </div>
         )}
 
-        {/* TAB 3: VERSION HISTORY */}
+        {/* Tab 3 History */}
         {activeTab === 'history' && (
           <div className="p-3 space-y-3">
             <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">
@@ -461,7 +648,6 @@ export function Sidebar({
               <div className="relative border-l border-slate-800 ml-1.5 pl-3.5 space-y-4 py-1">
                 {versionHistory.map(v => (
                   <div key={v.id} className="relative group/version">
-                    {/* Circle bullet */}
                     <div className="absolute w-2 h-2 rounded-full bg-slate-700 border border-slate-900 -left-[18.5px] top-1 group-hover/version:bg-blue-500 transition-colors" />
                     
                     <div className="flex flex-col gap-0.5">
@@ -484,8 +670,87 @@ export function Sidebar({
             )}
           </div>
         )}
-
       </div>
+
+      {/* 6. Breadcrumbs Footer */}
+      {selectedElementId && (
+        <div className="p-2.5 bg-slate-950/80 border-t border-slate-800 text-[9px] text-slate-500 font-mono truncate flex items-center gap-1 shrink-0">
+          <span className="font-bold text-slate-600 uppercase text-[8px] tracking-wide shrink-0 mr-1">Caminho:</span>
+          <div className="flex items-center gap-1 overflow-x-auto no-scrollbar">
+            {getSelectedLineage(semanticTree, selectedElementId)?.map((node, i, arr) => (
+              <span key={node.id} className="flex items-center gap-1 shrink-0">
+                <span 
+                  className="hover:text-blue-400 cursor-pointer transition-colors"
+                  onClick={() => onSelectElement(node.id)}
+                >
+                  {getFriendlyNodeName(node)}
+                </span>
+                {i < arr.length - 1 && <span className="text-slate-800">/</span>}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* CUSTOM FLOATING CONTEXT MENU */}
+      {contextMenu && (
+        <div
+          ref={contextMenuRef}
+          className="fixed bg-slate-900 border border-slate-800 rounded-lg shadow-2xl p-1 z-50 w-44 animate-scale-in glass-panel shadow-premium text-slate-300 font-sans"
+          style={{ top: `${contextMenu.y}px`, left: `${contextMenu.x}px` }}
+        >
+          <button
+            onClick={() => {
+              onDuplicateElement(contextMenu.nodeId);
+              setContextMenu(null);
+            }}
+            className="w-full text-left px-2.5 py-1.5 rounded hover:bg-slate-800/60 text-xs flex items-center justify-between cursor-pointer"
+          >
+            <span className="flex items-center gap-2"><Copy className="w-3.5 h-3.5" /> Duplicar</span>
+            <span className="text-[9px] text-slate-600 font-mono">⌘D</span>
+          </button>
+          
+          <button
+            onClick={() => {
+              onToggleLock(contextMenu.nodeId);
+              setContextMenu(null);
+            }}
+            className="w-full text-left px-2.5 py-1.5 rounded hover:bg-slate-800/60 text-xs flex items-center gap-2 cursor-pointer"
+          >
+            <Lock className="w-3.5 h-3.5" /> Bloquear/Desbloquear
+          </button>
+
+          <button
+            onClick={() => {
+              onToggleHide(contextMenu.nodeId);
+              setContextMenu(null);
+            }}
+            className="w-full text-left px-2.5 py-1.5 rounded hover:bg-slate-800/60 text-xs flex items-center gap-2 cursor-pointer"
+          >
+            <Eye className="w-3.5 h-3.5" /> Ocultar/Exibir
+          </button>
+
+          <button
+            onClick={(e) => startRename(contextMenu.nodeId, '', e)}
+            className="w-full text-left px-2.5 py-1.5 rounded hover:bg-slate-800/60 text-xs flex items-center gap-2 cursor-pointer"
+          >
+            <Type className="w-3.5 h-3.5" /> Renomear Camada
+          </button>
+
+          <div className="h-px bg-slate-800/60 my-1" />
+
+          <button
+            onClick={() => {
+              onDeleteElement(contextMenu.nodeId);
+              setContextMenu(null);
+            }}
+            className="w-full text-left px-2.5 py-1.5 rounded hover:bg-red-950/40 text-red-400 text-xs flex items-center justify-between cursor-pointer"
+          >
+            <span className="flex items-center gap-2"><Trash2 className="w-3.5 h-3.5 text-red-500" /> Excluir</span>
+            <span className="text-[9px] text-red-500/60 font-mono">Del</span>
+          </button>
+        </div>
+      )}
     </aside>
   );
 }

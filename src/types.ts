@@ -5,10 +5,12 @@ export interface SemanticElement {
   text?: string;     // Inner text if applicable (and short)
   classes: string[]; // List of CSS classes
   style: Record<string, string>; // Inline styles (or computed styles)
+  attributes?: Record<string, string>; // HTML / Accessibility attributes
   children: SemanticElement[];
   xpath: string;     // XPath or selector to map back to the real DOM element
   isLocked?: boolean; // If element is locked in layers panel
   isHidden?: boolean; // If element is hidden in layers panel
+  label?: string; // Friendly renamed layer name
 }
 
 export interface FileItem {

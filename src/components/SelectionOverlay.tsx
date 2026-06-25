@@ -1,8 +1,12 @@
+import { useState, useEffect } from 'react';
+
 interface Rect {
   top: number;
   left: number;
   width: number;
   height: number;
+  x?: number;
+  y?: number;
 }
 
 interface SelectionOverlayProps {
@@ -20,18 +24,133 @@ export function SelectionOverlay({
   hoveredTag,
   quickAction
 }: SelectionOverlayProps) {
+  const [altPressed, setAltPressed] = useState(false);
+
+  // Monitor alt/option key press for guidelines measurement
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Alt') {
+        setAltPressed(true);
+      }
+    };
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.key === 'Alt') {
+        setAltPressed(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+    };
+  }, []);
+
   if (!selectedRect && !hoveredRect) return null;
 
+  // Render guidelines when holding Alt key
+  const renderAltGuides = () => {
+    if (!altPressed || !selectedRect || !hoveredRect) return null;
+    
+    const sel = selectedRect;
+    const hov = hoveredRect;
+    const guides: React.ReactNode[] = [];
+    
+    // Horizontal distance measurement
+    if (sel.left + sel.width <= hov.left) {
+      const dist = hov.left - (sel.left + sel.width);
+      const topPos = sel.top + sel.height / 2;
+      guides.push(
+        <div 
+          key="dist-r"
+          className="absolute border-t border-dashed border-pink-500 flex items-center justify-center pointer-events-none z-30"
+          style={{
+            top: `${topPos}px`,
+            left: `${sel.left + sel.width}px`,
+            width: `${dist}px`,
+            height: '1px'
+          }}
+        >
+          <span className="bg-pink-600 text-white font-mono text-[8px] font-bold px-1 py-0.5 rounded -translate-y-1/2 shadow-sm">
+            {Math.round(dist)}
+          </span>
+        </div>
+      );
+    } else if (hov.left + hov.width <= sel.left) {
+      const dist = sel.left - (hov.left + hov.width);
+      const topPos = sel.top + sel.height / 2;
+      guides.push(
+        <div 
+          key="dist-l"
+          className="absolute border-t border-dashed border-pink-500 flex items-center justify-center pointer-events-none z-30"
+          style={{
+            top: `${topPos}px`,
+            left: `${hov.left + hov.width}px`,
+            width: `${dist}px`,
+            height: '1px'
+          }}
+        >
+          <span className="bg-pink-600 text-white font-mono text-[8px] font-bold px-1 py-0.5 rounded -translate-y-1/2 shadow-sm">
+            {Math.round(dist)}
+          </span>
+        </div>
+      );
+    }
+
+    // Vertical distance measurement
+    if (sel.top + sel.height <= hov.top) {
+      const dist = hov.top - (sel.top + sel.height);
+      const leftPos = sel.left + sel.width / 2;
+      guides.push(
+        <div 
+          key="dist-b"
+          className="absolute border-l border-dashed border-pink-500 flex flex-col items-center justify-center pointer-events-none z-30"
+          style={{
+            top: `${sel.top + sel.height}px`,
+            left: `${leftPos}px`,
+            width: '1px',
+            height: `${dist}px`
+          }}
+        >
+          <span className="bg-pink-600 text-white font-mono text-[8px] font-bold px-1 py-0.5 rounded translate-x-1/2 shadow-sm">
+            {Math.round(dist)}
+          </span>
+        </div>
+      );
+    } else if (hov.top + hov.height <= sel.top) {
+      const dist = sel.top - (hov.top + hov.height);
+      const leftPos = sel.left + sel.width / 2;
+      guides.push(
+        <div 
+          key="dist-t"
+          className="absolute border-l border-dashed border-pink-500 flex flex-col items-center justify-center pointer-events-none z-30"
+          style={{
+            top: `${hov.top + hov.height}px`,
+            left: `${leftPos}px`,
+            width: '1px',
+            height: `${dist}px`
+          }}
+        >
+          <span className="bg-pink-600 text-white font-mono text-[8px] font-bold px-1 py-0.5 rounded translate-x-1/2 shadow-sm">
+            {Math.round(dist)}
+          </span>
+        </div>
+      );
+    }
+    
+    return guides;
+  };
+
   return (
-    <div className="absolute inset-0 pointer-events-none z-10 overflow-hidden">
-      {/* HOVER OVERLAY */}
+    <div className="absolute inset-0 pointer-events-none z-10 overflow-hidden select-none">
+      {/* 1. HOVER OVERLAY (Purple dashed, figma style) */}
       {hoveredRect && (!selectedRect || 
-        selectedRect.left !== hoveredRect.left || 
-        selectedRect.top !== hoveredRect.top || 
-        selectedRect.width !== hoveredRect.width || 
-        selectedRect.height !== hoveredRect.height) && (
+        Math.abs(selectedRect.left - hoveredRect.left) > 1 || 
+        Math.abs(selectedRect.top - hoveredRect.top) > 1 || 
+        Math.abs(selectedRect.width - hoveredRect.width) > 1 || 
+        Math.abs(selectedRect.height - hoveredRect.height) > 1) && (
         <div
-          className="absolute border border-dashed border-purple-500/60 bg-purple-500/5 transition-all duration-75 pointer-events-none"
+          className="absolute border border-purple-500/70 bg-purple-500/5 transition-all duration-75 pointer-events-none shadow-glow-purple"
           style={{
             top: `${hoveredRect.top}px`,
             left: `${hoveredRect.left}px`,
@@ -40,17 +159,17 @@ export function SelectionOverlay({
           }}
         >
           {hoveredTag && (
-            <div className="absolute top-0 left-0 -translate-y-full bg-purple-600 text-white font-mono text-[9px] px-1 py-0.5 rounded shadow-md whitespace-nowrap">
+            <div className="absolute top-0 left-0 -translate-y-full bg-purple-600 text-white font-mono text-[9px] font-bold px-1.5 py-0.5 rounded-t shadow-md whitespace-nowrap">
               {hoveredTag.toLowerCase()}
             </div>
           )}
         </div>
       )}
 
-      {/* SELECTION OVERLAY */}
+      {/* 2. SELECTION OVERLAY (Blue solid, figma style) */}
       {selectedRect && (
         <div
-          className="absolute border-2 border-blue-500 bg-blue-500/5 pointer-events-none"
+          className="absolute border-2 border-blue-500 bg-blue-500/5 pointer-events-none shadow-glow-blue"
           style={{
             top: `${selectedRect.top}px`,
             left: `${selectedRect.left}px`,
@@ -60,46 +179,54 @@ export function SelectionOverlay({
         >
           {/* Tag Name Badge */}
           {selectedTag && (
-            <div className="absolute top-0 left-0 -translate-y-full bg-blue-600 text-white font-mono text-[10px] font-bold px-1.5 py-0.5 rounded-t shadow-md whitespace-nowrap flex items-center gap-1.5 pointer-events-auto">
+            <div className="absolute top-0 left-0 -translate-y-full bg-blue-600 text-white font-mono text-[9px] font-bold px-2 py-0.5 rounded-t shadow-md whitespace-nowrap flex items-center gap-1.5 pointer-events-auto">
               <span>{selectedTag.toLowerCase()}</span>
+              {selectedRect.x !== undefined && selectedRect.y !== undefined && (
+                <span className="text-blue-200 border-l border-blue-400/40 pl-1.5 text-[8px] font-medium">
+                  X: {selectedRect.x} Y: {selectedRect.y}
+                </span>
+              )}
             </div>
           )}
 
-          {/* Bounding box handles (8-point resize visualization) */}
-          <div className="absolute w-2 h-2 bg-white border border-blue-600 rounded-sm -top-1 -left-1" />
-          <div className="absolute w-2 h-2 bg-white border border-blue-600 rounded-sm -top-1 -right-1" />
-          <div className="absolute w-2 h-2 bg-white border border-blue-600 rounded-sm -bottom-1 -left-1" />
-          <div className="absolute w-2 h-2 bg-white border border-blue-600 rounded-sm -bottom-1 -right-1" />
-          
-          <div className="absolute w-2 h-2 bg-white border border-blue-600 rounded-sm top-1/2 -left-1 -translate-y-1/2" />
-          <div className="absolute w-2 h-2 bg-white border border-blue-600 rounded-sm top-1/2 -right-1 -translate-y-1/2" />
-          <div className="absolute w-2 h-2 bg-white border border-blue-600 rounded-sm -top-1 left-1/2 -translate-x-1/2" />
-          <div className="absolute w-2 h-2 bg-white border border-blue-600 rounded-sm -bottom-1 left-1/2 -translate-x-1/2" />
+          {/* Width x Height Dimensions Badge */}
+          <div className="absolute bottom-0 left-1/2 -translate-x-1/2 translate-y-full bg-blue-600 text-white font-mono text-[9px] font-bold px-2 py-0.5 rounded-b shadow-md whitespace-nowrap z-20">
+            {Math.round(selectedRect.width)} × {Math.round(selectedRect.height)}
+          </div>
 
-          {/* Quick Action Buttons Toolbar */}
-          <div 
-            className="absolute right-0 top-0 -translate-y-full flex gap-1 pointer-events-auto pb-1"
-          >
+          {/* Discreet Figma Bounding Box Handles */}
+          <div className="absolute w-1.5 h-1.5 bg-white border border-blue-600 rounded-sm -top-[3.5px] -left-[3.5px] pointer-events-auto cursor-nwse-resize" />
+          <div className="absolute w-1.5 h-1.5 bg-white border border-blue-600 rounded-sm -top-[3.5px] -right-[3.5px] pointer-events-auto cursor-nesw-resize" />
+          <div className="absolute w-1.5 h-1.5 bg-white border border-blue-600 rounded-sm -bottom-[3.5px] -left-[3.5px] pointer-events-auto cursor-nesw-resize" />
+          <div className="absolute w-1.5 h-1.5 bg-white border border-blue-600 rounded-sm -bottom-[3.5px] -right-[3.5px] pointer-events-auto cursor-nwse-resize" />
+          
+          <div className="absolute w-1.5 h-1.5 bg-white border border-blue-600 rounded-sm top-1/2 -left-[3.5px] -translate-y-1/2 pointer-events-auto cursor-ew-resize" />
+          <div className="absolute w-1.5 h-1.5 bg-white border border-blue-600 rounded-sm top-1/2 -right-[3.5px] -translate-y-1/2 pointer-events-auto cursor-ew-resize" />
+          <div className="absolute w-1.5 h-1.5 bg-white border border-blue-600 rounded-sm -top-[3.5px] left-1/2 -translate-x-1/2 pointer-events-auto cursor-ns-resize" />
+          <div className="absolute w-1.5 h-1.5 bg-white border border-blue-600 rounded-sm -bottom-[3.5px] left-1/2 -translate-x-1/2 pointer-events-auto cursor-ns-resize" />
+
+          {/* Quick Action Floating Toolbar */}
+          <div className="absolute right-0 top-0 -translate-y-full flex gap-1 pointer-events-auto pb-1 z-30">
             {quickAction && (
-              <div className="flex bg-slate-900 border border-slate-800 rounded shadow-md overflow-hidden text-xs text-slate-300">
+              <div className="flex bg-slate-900/90 backdrop-blur border border-slate-800 rounded-lg shadow-premium overflow-hidden text-[10px] text-slate-300 font-sans p-0.5">
                 <button
                   onClick={() => quickAction('font-up')}
-                  className="px-2 py-0.5 hover:bg-slate-800 border-r border-slate-800 font-bold"
+                  className="px-2 py-1 hover:bg-slate-800 rounded-l-md font-bold transition-colors cursor-pointer border-r border-slate-800"
                   title="Aumentar Texto"
                 >
                   A+
                 </button>
                 <button
                   onClick={() => quickAction('font-down')}
-                  className="px-2 py-0.5 hover:bg-slate-800 border-r border-slate-800 font-bold"
+                  className="px-2 py-1 hover:bg-slate-800 font-bold transition-colors cursor-pointer border-r border-slate-800"
                   title="Diminuir Texto"
                 >
                   A-
                 </button>
                 <button
                   onClick={() => quickAction('delete')}
-                  className="px-2 py-0.5 hover:bg-red-950 hover:text-red-400 font-medium"
-                  title="Excluir Elemento"
+                  className="px-2 py-1 hover:bg-red-950/45 hover:text-red-400 font-semibold transition-colors cursor-pointer rounded-r-md"
+                  title="Excluir Elemento (Del)"
                 >
                   Excluir
                 </button>
@@ -108,6 +235,9 @@ export function SelectionOverlay({
           </div>
         </div>
       )}
+
+      {/* 3. MEASUREMENT ALIGNMENT LINES */}
+      {renderAltGuides()}
     </div>
   );
 }
