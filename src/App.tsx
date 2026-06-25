@@ -48,7 +48,11 @@ export default function App() {
   const [activeHtmlPath, setActiveHtmlPath] = useState<string | null>(null);
   const [htmlContent, setHtmlContent] = useState<string>(''); // HTML containing data-editor-id
   
-  const [selectedElementId, setSelectedElementId] = useState<string | null>(null);
+  const [selectedElementIds, setSelectedElementIds] = useState<string[]>([]);
+  const selectedElementId = selectedElementIds[0] || null;
+  const setSelectedElementId = (id: string | null) => {
+    setSelectedElementIds(id ? [id] : []);
+  };
   const [hoveredElementId, setHoveredElementId] = useState<string | null>(null);
   const [semanticTree, setSemanticTree] = useState<SemanticElement[]>([]);
 
@@ -117,6 +121,24 @@ export default function App() {
           htmlContent: htmlWithIds
         }
       ]);
+    }
+  };
+
+  const handleSelectElement = (id: string | null, isMulti = false) => {
+    if (!id) {
+      setSelectedElementIds([]);
+      return;
+    }
+    if (isMulti) {
+      setSelectedElementIds(prev => {
+        if (prev.includes(id)) {
+          return prev.filter(x => x !== id);
+        } else {
+          return [...prev, id];
+        }
+      });
+    } else {
+      setSelectedElementIds([id]);
     }
   };
 
@@ -198,28 +220,42 @@ export default function App() {
 
   // Modify Element Styles
   const handleUpdateStyles = async (elementId: string, styles: Record<string, string>) => {
+    const idsToUpdate = selectedElementIds.includes(elementId)
+      ? selectedElementIds
+      : [elementId];
+
     const parser = new DOMParser();
     const doc = parser.parseFromString(htmlContent, 'text/html');
-    const el = doc.querySelector(`[data-editor-id="${elementId}"]`);
+    let updatedCount = 0;
 
-    if (el) {
-      const htmlEl = el as HTMLElement;
-      Object.entries(styles).forEach(([key, value]) => {
-        const attributeKeys = ['src', 'id', 'title', 'href', 'target', 'alt', 'role', 'aria-label', 'class', 'className'];
-        const isAttribute = attributeKeys.includes(key) || key.startsWith('aria-') || key.startsWith('data-');
-        
-        if (isAttribute) {
-          const attrName = key === 'className' ? 'class' : key;
-          if (value === '') {
-            htmlEl.removeAttribute(attrName);
+    idsToUpdate.forEach(id => {
+      const el = doc.querySelector(`[data-editor-id="${id}"]`);
+      if (el) {
+        const htmlEl = el as HTMLElement;
+        Object.entries(styles).forEach(([key, value]) => {
+          const attributeKeys = ['src', 'id', 'title', 'href', 'target', 'alt', 'role', 'aria-label', 'class', 'className'];
+          const isAttribute = attributeKeys.includes(key) || key.startsWith('aria-') || key.startsWith('data-');
+          
+          if (isAttribute) {
+            const attrName = key === 'className' ? 'class' : key;
+            if (value === '') {
+              htmlEl.removeAttribute(attrName);
+            } else {
+              htmlEl.setAttribute(attrName, value);
+            }
           } else {
-            htmlEl.setAttribute(attrName, value);
+            htmlEl.style[key as any] = value;
           }
-        } else {
-          htmlEl.style[key as any] = value;
-        }
-      });
-      await updateHtml(doc.documentElement.outerHTML, `Ajustou ${el.tagName.toLowerCase()}`);
+        });
+        updatedCount++;
+      }
+    });
+
+    if (updatedCount > 0) {
+      const desc = updatedCount === 1 
+        ? `Ajustou estilo de ${doc.querySelector(`[data-editor-id="${elementId}"]`)?.tagName.toLowerCase() || 'elemento'}`
+        : `Ajustou estilos de ${updatedCount} elementos`;
+      await updateHtml(doc.documentElement.outerHTML, desc);
     }
   };
 
@@ -237,41 +273,63 @@ export default function App() {
 
   // Delete Element
   const handleDeleteElement = async (elementId: string) => {
+    const idsToDelete = selectedElementIds.includes(elementId)
+      ? selectedElementIds
+      : [elementId];
+
     const parser = new DOMParser();
     const doc = parser.parseFromString(htmlContent, 'text/html');
-    const el = doc.querySelector(`[data-editor-id="${elementId}"]`);
+    let deleteCount = 0;
 
-    if (el) {
-      el.remove();
-      setSelectedElementId(null);
-      await updateHtml(doc.documentElement.outerHTML, `Removeu ${el.tagName.toLowerCase()}`);
+    idsToDelete.forEach(id => {
+      const el = doc.querySelector(`[data-editor-id="${id}"]`);
+      if (el) {
+        el.remove();
+        deleteCount++;
+      }
+    });
+
+    if (deleteCount > 0) {
+      setSelectedElementIds([]);
+      await updateHtml(doc.documentElement.outerHTML, `Removeu ${deleteCount} elemento(s)`);
     }
   };
 
   // Quick Font Size Adjustment
   const handleQuickFontChange = async (elementId: string, direction: 'up' | 'down') => {
+    const idsToUpdate = selectedElementIds.includes(elementId)
+      ? selectedElementIds
+      : [elementId];
+
     const parser = new DOMParser();
     const doc = parser.parseFromString(htmlContent, 'text/html');
-    const el = doc.querySelector(`[data-editor-id="${elementId}"]`) as HTMLElement;
+    let updatedCount = 0;
 
-    if (el) {
-      let num = 16;
-      let unit = 'px';
+    idsToUpdate.forEach(id => {
+      const el = doc.querySelector(`[data-editor-id="${id}"]`) as HTMLElement;
+      if (el) {
+        let num = 16;
+        let unit = 'px';
 
-      const styleSize = el.style.fontSize;
-      if (styleSize) {
-        const match = styleSize.match(/^(\d+(?:\.\d+)?)(px|rem|em|%|pt)$/);
-        if (match) {
-          num = parseFloat(match[1]);
-          unit = match[2];
+        const styleSize = el.style.fontSize;
+        if (styleSize) {
+          const match = styleSize.match(/^(\d+(?:\.\d+)?)(px|rem|em|%|pt)$/);
+          if (match) {
+            num = parseFloat(match[1]);
+            unit = match[2];
+          }
         }
-      }
 
-      const diff = unit === 'px' ? 2 : 0.1;
-      const newSize = direction === 'up' ? num + diff : Math.max(8, num - diff);
-      
-      el.style.fontSize = `${newSize}${unit}`;
-      await updateHtml(doc.documentElement.outerHTML, `Ajustou tamanho fonte de ${el.tagName.toLowerCase()}`);
+        const diff = unit === 'px' ? 2 : 0.1;
+        const newSize = direction === 'up' ? num + diff : Math.max(8, num - diff);
+        
+        el.style.fontSize = `${newSize}${unit}`;
+        updatedCount++;
+      }
+    });
+
+    if (updatedCount > 0) {
+      await updateHtml(doc.documentElement.outerHTML, `Ajustou tamanho fonte de ${updatedCount} elemento(s)`);
     }
   };
 
@@ -629,6 +687,61 @@ export default function App() {
       const parent = targetEl.parentElement;
       parent.insertBefore(draggedEl, targetEl);
       await updateHtml(doc.documentElement.outerHTML, `Moveu elemento ${draggedEl.tagName.toLowerCase()}`);
+    }
+  };
+
+  const handleMoveElementToLocation = async (
+    draggedId: string,
+    targetId: string,
+    position: 'before' | 'after' | 'inside'
+  ) => {
+    const idsToMove = selectedElementIds.includes(draggedId)
+      ? selectedElementIds
+      : [draggedId];
+
+    if (idsToMove.includes(targetId)) return; // Prevent target from being moved into itself
+
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(htmlContent, 'text/html');
+    const targetEl = doc.querySelector(`[data-editor-id="${targetId}"]`);
+    
+    if (targetEl) {
+      // Filter out nested selections (e.g. if parent and child are both selected, only move parent!)
+      const rootIdsToMove = idsToMove.filter(id => {
+        const el = doc.querySelector(`[data-editor-id="${id}"]`);
+        if (!el) return false;
+        let parent = el.parentElement;
+        while (parent) {
+          const pId = parent.getAttribute('data-editor-id');
+          if (pId && idsToMove.includes(pId)) return false;
+          parent = parent.parentElement;
+        }
+        return true;
+      });
+
+      let insertPosRef = targetEl;
+      rootIdsToMove.forEach(id => {
+        const draggedEl = doc.querySelector(`[data-editor-id="${id}"]`);
+        if (draggedEl) {
+          // Verify draggedEl is not an ancestor of targetEl to avoid cycle
+          if (draggedEl.contains(targetEl)) return;
+
+          if (position === 'inside') {
+            targetEl.appendChild(draggedEl);
+          } else if (position === 'before') {
+            targetEl.parentNode?.insertBefore(draggedEl, insertPosRef);
+          } else if (position === 'after') {
+            targetEl.parentNode?.insertBefore(draggedEl, insertPosRef.nextSibling);
+            insertPosRef = draggedEl; // Advance reference to maintain relative selection order
+          }
+        }
+      });
+
+      const posLabel = position === 'inside' ? 'dentro de' : position === 'before' ? 'antes de' : 'depois de';
+      await updateHtml(
+        doc.documentElement.outerHTML,
+        `Moveu ${rootIdsToMove.length} elemento(s) para ${posLabel} ${targetEl.tagName.toLowerCase()}`
+      );
     }
   };
 
@@ -1235,7 +1348,8 @@ export default function App() {
           <Sidebar
             semanticTree={semanticTree}
             selectedElementId={selectedElementId}
-            onSelectElement={setSelectedElementId}
+            selectedElementIds={selectedElementIds}
+            onSelectElement={handleSelectElement}
             hoveredElementId={hoveredElementId}
             onHoverElement={setHoveredElementId}
             files={projectFileList}
@@ -1269,8 +1383,9 @@ export default function App() {
         <Canvas
           htmlContent={previewHtml}
           selectedElementId={selectedElementId}
+          selectedElementIds={selectedElementIds}
           hoveredElementId={hoveredElementId}
-          onSelectElement={setSelectedElementId}
+          onSelectElement={handleSelectElement}
           onHoverElement={setHoveredElementId}
           onUpdateText={handleUpdateText}
           onDeleteElement={handleDeleteElement}
@@ -1285,6 +1400,7 @@ export default function App() {
           onMoveElementOut={handleMoveElementOut}
           onGroupElement={handleGroupElement}
           onInsertComponent={handleInsertPresetComponent}
+          onMoveElementToLocation={handleMoveElementToLocation}
           
           zoomScale={zoomScale}
           onZoomChange={setZoomScale}
@@ -1336,7 +1452,7 @@ export default function App() {
           onClose={() => setIsCommandPaletteOpen(false)}
           commands={commandPaletteCommands}
           semanticTree={semanticTree}
-          onSelectElement={setSelectedElementId}
+          onSelectElement={handleSelectElement}
         />
       </div>
     </div>

@@ -41,7 +41,8 @@ import { runHtmlValidation } from '../utils/validation';
 interface SidebarProps {
   semanticTree: SemanticElement[];
   selectedElementId: string | null;
-  onSelectElement: (id: string | null) => void;
+  selectedElementIds: string[];
+  onSelectElement: (id: string | null, isMulti?: boolean) => void;
   hoveredElementId: string | null;
   onHoverElement: (id: string | null) => void;
   files: string[];
@@ -208,6 +209,7 @@ export function hasParentNode(nodes: SemanticElement[], targetId: string): boole
 export function Sidebar({
   semanticTree,
   selectedElementId,
+  selectedElementIds,
   onSelectElement,
   hoveredElementId,
   onHoverElement,
@@ -386,7 +388,7 @@ export function Sidebar({
 
     if (!isNodeVisible(node)) return null;
 
-    const isSelected = selectedElementId === node.id;
+    const isSelected = selectedElementIds.includes(node.id);
     const isHovered = hoveredElementId === node.id;
     const isCollapsed = !!collapsedNodes[node.id];
     const hasChildren = node.children && node.children.length > 0;
@@ -447,7 +449,7 @@ export function Sidebar({
           style={{ paddingLeft: `${depth * 10 + 6}px` }}
           onClick={(e) => {
             e.stopPropagation();
-            onSelectElement(node.id);
+            onSelectElement(node.id, e.shiftKey || e.metaKey || e.ctrlKey);
           }}
           onMouseEnter={() => onHoverElement(node.id)}
           onMouseLeave={() => onHoverElement(null)}

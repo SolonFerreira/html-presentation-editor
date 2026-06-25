@@ -54,4 +54,80 @@ describe('SelectionOverlay Component', () => {
     // Check axis line for column direction
     expect(getByText('col ↓')).not.toBeNull();
   });
+
+  it('renders outlines for all selected elements but badges/handles only on primary element', () => {
+    const multiProps = {
+      selectedElementId: 'el-1',
+      selectedRect: { top: 10, left: 20, width: 200, height: 100 },
+      selectedRects: [
+        { top: 10, left: 20, width: 200, height: 100 },
+        { top: 120, left: 20, width: 200, height: 80 }
+      ],
+      hoveredRect: null,
+      selectedTag: 'div',
+      selectedTags: ['div', 'p'],
+      hoveredTag: null
+    };
+
+    const { container, queryByText, getByText } = render(<SelectionOverlay {...multiProps} />);
+
+    // Outlines should be rendered for both elements
+    const selectedContainers = container.querySelectorAll('.border-2.border-blue-500');
+    expect(selectedContainers.length).toBe(2);
+
+    // Primary element tag badge (div) and dimensions (200 x 100) should be rendered
+    expect(getByText('div')).not.toBeNull();
+    expect(getByText('200 × 100')).not.toBeNull();
+
+    // Secondary element tag badge (p) and dimensions (200 x 80) should NOT be rendered
+    expect(queryByText('p')).toBeNull();
+    expect(queryByText('200 × 80')).toBeNull();
+    
+    // There should be a Grip icon for dragging
+    const gripHandle = container.querySelector('[draggable="true"]');
+    expect(gripHandle).not.toBeNull();
+    expect(gripHandle?.getAttribute('data-editor-id')).toBe('el-1');
+  });
+
+  it('renders drop target indicator box when dropPosition is inside', () => {
+    const dropProps = {
+      selectedRect: null,
+      hoveredRect: null,
+      selectedTag: null,
+      hoveredTag: null,
+      dropTargetRect: { top: 50, left: 100, width: 300, height: 150 },
+      dropPosition: 'inside' as const
+    };
+
+    const { container } = render(<SelectionOverlay {...dropProps} />);
+
+    // Visual drop target container check
+    const dropBox = container.querySelector('[class*="border-dashed"][class*="border-blue-500"]');
+    expect(dropBox).not.toBeNull();
+    expect(dropBox?.getAttribute('style')).toContain('top: 50px');
+    expect(dropBox?.getAttribute('style')).toContain('width: 300px');
+  });
+
+  it('renders drop line when dropPosition is before or after', () => {
+    const dropProps = {
+      selectedRect: null,
+      hoveredRect: null,
+      selectedTag: null,
+      hoveredTag: null,
+      dropTargetRect: { top: 50, left: 100, width: 300, height: 150 },
+      dropPosition: 'before' as const
+    };
+
+    const { container } = render(<SelectionOverlay {...dropProps} />);
+
+    // Visual drop line check
+    const dropLine = container.querySelector('[class*="bg-blue-500"]');
+    expect(dropLine).not.toBeNull();
+    expect(dropLine?.getAttribute('style')).toContain('top: 48px'); // 50px - 2px offset
+    expect(dropLine?.getAttribute('style')).toContain('width: 300px');
+
+    // Precision dot check
+    const dot = dropLine?.querySelector('.rounded-full');
+    expect(dot).not.toBeNull();
+  });
 });

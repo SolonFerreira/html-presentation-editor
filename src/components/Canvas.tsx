@@ -16,8 +16,9 @@ interface Rect {
 interface CanvasProps {
   htmlContent: string;
   selectedElementId: string | null;
+  selectedElementIds: string[];
   hoveredElementId: string | null;
-  onSelectElement: (id: string | null) => void;
+  onSelectElement: (id: string | null, isMulti?: boolean) => void;
   onHoverElement: (id: string | null) => void;
   onUpdateText: (elementId: string, text: string) => void;
   onDeleteElement: (elementId: string) => void;
@@ -34,6 +35,7 @@ interface CanvasProps {
   onMoveElementOut?: (id: string) => void;
   onGroupElement?: (id: string) => void;
   onInsertComponent?: (elementId: string | null, componentType: string) => void;
+  onMoveElementToLocation?: (draggedId: string, targetId: string, position: 'before' | 'after' | 'inside') => void;
 
   // Canvas attributes
   zoomScale: number;
@@ -45,6 +47,7 @@ interface CanvasProps {
 export function Canvas({
   htmlContent,
   selectedElementId,
+  selectedElementIds = [],
   hoveredElementId,
   onSelectElement,
   onHoverElement,
@@ -61,6 +64,7 @@ export function Canvas({
   onMoveElementOut,
   onGroupElement,
   onInsertComponent,
+  onMoveElementToLocation,
   
   zoomScale,
   onZoomChange,
@@ -84,12 +88,20 @@ export function Canvas({
   }
   
   const [selectedRect, setSelectedRect] = useState<Rect | null>(null);
+  const [selectedRects, setSelectedRects] = useState<Rect[]>([]);
   const [hoveredRect, setHoveredRect] = useState<Rect | null>(null);
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [hoveredTag, setHoveredTag] = useState<string | null>(null);
   const [selectedPadding, setSelectedPadding] = useState<{ top: number; right: number; bottom: number; left: number } | undefined>(undefined);
   const [selectedDisplay, setSelectedDisplay] = useState<string | undefined>(undefined);
   const [selectedFlexDirection, setSelectedFlexDirection] = useState<string | undefined>(undefined);
+
+  // Drag and drop visual layout states
+  const [draggedId, setDraggedId] = useState<string | null>(null);
+  const [dropTargetId, setDropTargetId] = useState<string | null>(null);
+  const [dropPosition, setDropPosition] = useState<'before' | 'after' | 'inside'>('after');
+  const [dropTargetRect, setDropTargetRect] = useState<Rect | null>(null);
 
   // Panning State
   const [spacePressed, setSpacePressed] = useState(false);
@@ -211,6 +223,30 @@ export function Canvas({
       isContainer
     });
   };
+
+  useEffect(() => {
+    const handleGlobalDragStart = (e: DragEvent) => {
+      const target = e.target as HTMLElement;
+      const editorId = target.getAttribute('data-editor-id') || target.closest('[data-editor-id]')?.getAttribute('data-editor-id');
+      if (editorId) {
+        setDraggedId(editorId);
+      }
+    };
+
+    const handleGlobalDragEnd = () => {
+      setDraggedId(null);
+      setDropTargetId(null);
+      setDropTargetRect(null);
+    };
+
+    window.addEventListener('dragstart', handleGlobalDragStart);
+    window.addEventListener('dragend', handleGlobalDragEnd);
+
+    return () => {
+      window.removeEventListener('dragstart', handleGlobalDragStart);
+      window.removeEventListener('dragend', handleGlobalDragEnd);
+    };
+  }, []);
 
   const handleViewportResizeStart = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -396,12 +432,19 @@ export function Canvas({
     const iframeDoc = iframe.contentDocument;
     const bodyRect = iframeDoc.body ? iframeDoc.body.getBoundingClientRect() : { left: 0, top: 0 };
 
-    // 1. Selected Rect
-    if (selectedElementId) {
-      const selectedEl = iframeDoc.querySelector(`[data-editor-id="${selectedElementId}"]`);
-      if (selectedEl) {
-        const clientRect = selectedEl.getBoundingClientRect();
-        setSelectedRect({
+    // 1. Selected Rects
+    const activeIds = selectedElementIds.length > 0
+      ? selectedElementIds
+      : (selectedElementId ? [selectedElementId] : []);
+
+    const rects: Rect[] = [];
+    const tags: string[] = [];
+
+    activeIds.forEach(id => {
+      const el = iframeDoc.querySelector(`[data-editor-id="${id}"]`);
+      if (el) {
+        const clientRect = el.getBoundingClientRect();
+        rects.push({
           top: clientRect.top,
           left: clientRect.left,
           width: clientRect.width,
@@ -409,9 +452,21 @@ export function Canvas({
           x: Math.round(clientRect.left - bodyRect.left),
           y: Math.round(clientRect.top - bodyRect.top)
         });
-        setSelectedTag(selectedEl.tagName);
+        tags.push(el.tagName);
+      }
+    });
 
-        const computedStyle = selectedEl.ownerDocument?.defaultView?.getComputedStyle(selectedEl) || window.getComputedStyle(selectedEl);
+    setSelectedRects(rects);
+    setSelectedTags(tags);
+
+    if (rects.length > 0) {
+      setSelectedRect(rects[0]);
+      setSelectedTag(tags[0]);
+
+      const primaryId = activeIds[0];
+      const primaryEl = iframeDoc.querySelector(`[data-editor-id="${primaryId}"]`);
+      if (primaryEl) {
+        const computedStyle = primaryEl.ownerDocument?.defaultView?.getComputedStyle(primaryEl) || window.getComputedStyle(primaryEl);
         if (computedStyle) {
           setSelectedPadding({
             top: parseFloat(computedStyle.paddingTop) || 0,
@@ -422,12 +477,6 @@ export function Canvas({
           setSelectedDisplay(computedStyle.display || undefined);
           setSelectedFlexDirection(computedStyle.flexDirection || undefined);
         }
-      } else {
-        setSelectedRect(null);
-        setSelectedTag(null);
-        setSelectedPadding(undefined);
-        setSelectedDisplay(undefined);
-        setSelectedFlexDirection(undefined);
       }
     } else {
       setSelectedRect(null);
@@ -464,7 +513,7 @@ export function Canvas({
   // Re-measure on state changes
   useEffect(() => {
     updateElementRects();
-  }, [selectedElementId, hoveredElementId, htmlContent, zoomScale, viewportMode]);
+  }, [selectedElementId, selectedElementIds, hoveredElementId, htmlContent, zoomScale, viewportMode]);
 
   // Set up iframe event listeners
   const handleIframeLoad = () => {
@@ -537,7 +586,7 @@ export function Canvas({
       }
       
       if (editorId) {
-        onSelectElement(editorId);
+        onSelectElement(editorId, e.shiftKey || e.metaKey || e.ctrlKey);
       } else {
         onSelectElement(null);
       }
@@ -620,6 +669,105 @@ export function Canvas({
       window.dispatchEvent(parentEvent);
     };
 
+    const handleIframeDragStart = (e: DragEvent) => {
+      const target = e.target as HTMLElement;
+      const editorId = target.getAttribute('data-editor-id') || target.closest('[data-editor-id]')?.getAttribute('data-editor-id');
+      if (editorId) {
+        setDraggedId(editorId);
+      }
+    };
+
+    const handleIframeDragEnd = () => {
+      setDraggedId(null);
+      setDropTargetId(null);
+      setDropTargetRect(null);
+    };
+
+    const handleIframeDragOver = (e: DragEvent) => {
+      e.preventDefault();
+      
+      const target = e.target as HTMLElement;
+      let currentEl: HTMLElement | null = target;
+      let targetId: string | null = null;
+      
+      while (currentEl && currentEl.tagName !== 'BODY') {
+        if (currentEl.getAttribute('data-editor-locked') === 'true') {
+          currentEl = currentEl.parentElement;
+          continue;
+        }
+        targetId = currentEl.getAttribute('data-editor-id');
+        if (targetId) break;
+        currentEl = currentEl.parentElement;
+      }
+
+      if (targetId && draggedId && targetId !== draggedId) {
+        const targetEl = iframeDoc.querySelector(`[data-editor-id="${targetId}"]`) as HTMLElement;
+        const draggedEl = iframeDoc.querySelector(`[data-editor-id="${draggedId}"]`);
+        
+        if (targetEl && draggedEl && !draggedEl.contains(targetEl)) {
+          const rect = targetEl.getBoundingClientRect();
+          const bodyRect = iframeDoc.body ? iframeDoc.body.getBoundingClientRect() : { left: 0, top: 0 };
+          
+          const relativeY = e.clientY - rect.top;
+          const isContainer = ['DIV', 'SECTION', 'ARTICLE', 'HEADER', 'FOOTER', 'NAV', 'MAIN'].includes(targetEl.tagName);
+          
+          let position: 'before' | 'after' | 'inside' = 'after';
+          
+          if (isContainer) {
+            const edgeZoneHeight = Math.min(rect.height * 0.2, 16);
+            if (relativeY < edgeZoneHeight) {
+              position = 'before';
+            } else if (relativeY > rect.height - edgeZoneHeight) {
+              position = 'after';
+            } else {
+              position = 'inside';
+            }
+          } else {
+            if (relativeY < rect.height / 2) {
+              position = 'before';
+            } else {
+              position = 'after';
+            }
+          }
+
+          setDropTargetId(targetId);
+          setDropPosition(position);
+          setDropTargetRect({
+            top: rect.top,
+            left: rect.left,
+            width: rect.width,
+            height: rect.height,
+            x: Math.round(rect.left - bodyRect.left),
+            y: Math.round(rect.top - bodyRect.top)
+          });
+        } else {
+          setDropTargetId(null);
+          setDropTargetRect(null);
+        }
+      } else {
+        setDropTargetId(null);
+        setDropTargetRect(null);
+      }
+    };
+
+    const handleIframeDragLeave = () => {
+      setDropTargetId(null);
+      setDropTargetRect(null);
+    };
+
+    const handleIframeDrop = (e: DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      if (draggedId && dropTargetId && onMoveElementToLocation) {
+        onMoveElementToLocation(draggedId, dropTargetId, dropPosition);
+      }
+
+      setDraggedId(null);
+      setDropTargetId(null);
+      setDropTargetRect(null);
+    };
+
     // Attach listeners
     iframeDoc.addEventListener('click', handleClick, true);
     iframeDoc.addEventListener('mouseover', handleMouseOver, true);
@@ -627,6 +775,11 @@ export function Canvas({
     iframeDoc.addEventListener('scroll', handleScroll, true);
     iframeDoc.addEventListener('dblclick', handleDoubleClick, true);
     iframeDoc.addEventListener('keydown', handleIFrameKeyDown, true);
+    iframeDoc.addEventListener('dragstart', handleIframeDragStart, true);
+    iframeDoc.addEventListener('dragend', handleIframeDragEnd, true);
+    iframeDoc.addEventListener('dragover', handleIframeDragOver, true);
+    iframeDoc.addEventListener('dragleave', handleIframeDragLeave, true);
+    iframeDoc.addEventListener('drop', handleIframeDrop, true);
 
     const resizeObserver = new ResizeObserver(() => {
       updateElementRects();
@@ -643,6 +796,11 @@ export function Canvas({
       iframeDoc.removeEventListener('scroll', handleScroll, true);
       iframeDoc.removeEventListener('dblclick', handleDoubleClick, true);
       iframeDoc.removeEventListener('keydown', handleIFrameKeyDown, true);
+      iframeDoc.removeEventListener('dragstart', handleIframeDragStart, true);
+      iframeDoc.removeEventListener('dragend', handleIframeDragEnd, true);
+      iframeDoc.removeEventListener('dragover', handleIframeDragOver, true);
+      iframeDoc.removeEventListener('dragleave', handleIframeDragLeave, true);
+      iframeDoc.removeEventListener('drop', handleIframeDrop, true);
       resizeObserver.disconnect();
     };
   };
@@ -833,15 +991,22 @@ export function Canvas({
 
           {htmlContent && (
             <SelectionOverlay
+              selectedElementId={selectedElementId}
               selectedRect={selectedRect}
+              selectedRects={selectedRects}
               hoveredRect={hoveredRect}
               selectedTag={selectedTag}
+              selectedTags={selectedTags}
               hoveredTag={hoveredTag}
               quickAction={handleQuickAction}
               onResizeStart={handleResizeStart}
               selectedPadding={selectedPadding}
               selectedDisplay={selectedDisplay}
               selectedFlexDirection={selectedFlexDirection}
+              draggedId={draggedId}
+              dropTargetId={dropTargetId}
+              dropPosition={dropPosition}
+              dropTargetRect={dropTargetRect}
             />
           )}
 
