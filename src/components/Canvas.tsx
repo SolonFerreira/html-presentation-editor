@@ -104,6 +104,20 @@ export function Canvas({
     draggedIdRef.current = draggedId;
   }, [draggedId]);
 
+  const onSelectElementRef = useRef(onSelectElement);
+  const onHoverElementRef = useRef(onHoverElement);
+  const onUpdateTextRef = useRef(onUpdateText);
+  const onMoveElementToLocationRef = useRef(onMoveElementToLocation);
+
+  useEffect(() => {
+    onSelectElementRef.current = onSelectElement;
+    onHoverElementRef.current = onHoverElement;
+    onUpdateTextRef.current = onUpdateText;
+    onMoveElementToLocationRef.current = onMoveElementToLocation;
+  }, [onSelectElement, onHoverElement, onUpdateText, onMoveElementToLocation]);
+
+  const iframeDragStartRef = useRef<{ x: number; y: number; editorId: string } | null>(null);
+
   const [dropTargetId, setDropTargetId] = useState<string | null>(null);
   const [dropPosition, setDropPosition] = useState<'before' | 'after' | 'inside'>('after');
   const [dropTargetRect, setDropTargetRect] = useState<Rect | null>(null);
@@ -112,6 +126,11 @@ export function Canvas({
   const [spacePressed, setSpacePressed] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0, scrollLeft: 0, scrollTop: 0 });
+
+  const spacePressedRef = useRef(false);
+  useEffect(() => {
+    spacePressedRef.current = spacePressed;
+  }, [spacePressed]);
 
   // Resizing State
   const [isResizing, setIsResizing] = useState(false);
@@ -751,9 +770,9 @@ export function Canvas({
       }
       
       if (editorId) {
-        onSelectElement(editorId, e.shiftKey || e.metaKey || e.ctrlKey);
+        onSelectElementRef.current(editorId, e.shiftKey || e.metaKey || e.ctrlKey);
       } else {
-        onSelectElement(null);
+        onSelectElementRef.current(null);
       }
     };
 
@@ -774,12 +793,12 @@ export function Canvas({
       }
 
       if (editorId) {
-        onHoverElement(editorId);
+        onHoverElementRef.current(editorId);
       }
     };
 
     const handleMouseOut = () => {
-      onHoverElement(null);
+      onHoverElementRef.current(null);
     };
 
     const handleScroll = () => {
@@ -806,7 +825,7 @@ export function Canvas({
 
       const saveText = () => {
         target.removeAttribute('contenteditable');
-        onUpdateText(editorId, target.innerText);
+        onUpdateTextRef.current(editorId, target.innerText);
         updateElementRects();
       };
 
@@ -945,13 +964,60 @@ export function Canvas({
 
       const activeDraggedId = draggedIdRef.current;
 
-      if (activeDraggedId && dropTargetId && onMoveElementToLocation) {
-        onMoveElementToLocation(activeDraggedId, dropTargetId, dropPosition);
+      if (activeDraggedId && dropTargetId && onMoveElementToLocationRef.current) {
+        onMoveElementToLocationRef.current(activeDraggedId, dropTargetId, dropPosition);
       }
 
       setDraggedId(null);
       setDropTargetId(null);
       setDropTargetRect(null);
+    };
+
+    const handleIframeMouseDown = (e: MouseEvent) => {
+      if (e.button !== 0 || spacePressedRef.current || draggedIdRef.current) return;
+
+      const target = e.target as HTMLElement;
+      if (target.getAttribute('contenteditable') === 'true') return;
+
+      let currentEl: HTMLElement | null = target;
+      let editorId: string | null = null;
+
+      while (currentEl && currentEl.tagName !== 'BODY') {
+        if (currentEl.getAttribute('data-editor-locked') === 'true') {
+          break;
+        }
+        editorId = currentEl.getAttribute('data-editor-id');
+        if (editorId) break;
+        currentEl = currentEl.parentElement;
+      }
+
+      if (editorId) {
+        iframeDragStartRef.current = {
+          x: e.clientX,
+          y: e.clientY,
+          editorId
+        };
+      }
+    };
+
+    const handleIframeMouseMoveThreshold = (e: MouseEvent) => {
+      if (draggedIdRef.current) {
+        iframeDragStartRef.current = null;
+        return;
+      }
+      if (iframeDragStartRef.current) {
+        const start = iframeDragStartRef.current;
+        const dx = e.clientX - start.x;
+        const dy = e.clientY - start.y;
+        if (Math.sqrt(dx * dx + dy * dy) > 5) {
+          setDraggedId(start.editorId);
+          iframeDragStartRef.current = null;
+        }
+      }
+    };
+
+    const handleIframeMouseUpThreshold = () => {
+      iframeDragStartRef.current = null;
     };
 
     // Attach listeners
@@ -966,6 +1032,9 @@ export function Canvas({
     iframeDoc.addEventListener('dragover', handleIframeDragOver, true);
     iframeDoc.addEventListener('dragleave', handleIframeDragLeave, true);
     iframeDoc.addEventListener('drop', handleIframeDrop, true);
+    iframeDoc.addEventListener('mousedown', handleIframeMouseDown, true);
+    iframeDoc.addEventListener('mousemove', handleIframeMouseMoveThreshold, true);
+    iframeDoc.addEventListener('mouseup', handleIframeMouseUpThreshold, true);
 
     const resizeObserver = new ResizeObserver(() => {
       updateElementRects();
@@ -987,6 +1056,9 @@ export function Canvas({
       iframeDoc.removeEventListener('dragover', handleIframeDragOver, true);
       iframeDoc.removeEventListener('dragleave', handleIframeDragLeave, true);
       iframeDoc.removeEventListener('drop', handleIframeDrop, true);
+      iframeDoc.removeEventListener('mousedown', handleIframeMouseDown, true);
+      iframeDoc.removeEventListener('mousemove', handleIframeMouseMoveThreshold, true);
+      iframeDoc.removeEventListener('mouseup', handleIframeMouseUpThreshold, true);
       resizeObserver.disconnect();
     };
   };

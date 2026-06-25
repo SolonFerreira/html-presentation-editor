@@ -400,6 +400,7 @@ export function Sidebar({
     return (
       <div 
         key={node.id} 
+        data-editor-id={node.id}
         className="w-full relative"
         draggable={!node.isLocked && !isRenameActive}
         onDragStart={(e) => {
