@@ -46,6 +46,19 @@ export function Canvas({
 }: CanvasProps) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const iframeScrollRef = useRef({ top: 0, left: 0 });
+  
+  // Refs for tracking iframe loading state, timers, and event cleanup
+  const isReloadingRef = useRef(false);
+  const prevHtmlContentRef = useRef(htmlContent);
+  const iframeTimersRef = useRef<number[]>([]);
+  const iframeCleanupRef = useRef<(() => void) | null>(null);
+
+  // If htmlContent changes, mark as reloading to block scroll updates from unload/reload events
+  if (prevHtmlContentRef.current !== htmlContent) {
+    isReloadingRef.current = true;
+    prevHtmlContentRef.current = htmlContent;
+  }
   
   const [selectedRect, setSelectedRect] = useState<Rect | null>(null);
   const [hoveredRect, setHoveredRect] = useState<Rect | null>(null);
@@ -201,7 +214,51 @@ export function Canvas({
     const iframe = iframeRef.current;
     if (!iframe || !iframe.contentDocument) return;
 
+    // Clear any previous scheduled scroll/reload timers
+    iframeTimersRef.current.forEach(timer => window.clearTimeout(timer));
+    iframeTimersRef.current = [];
+
+    // Clean up previous event listeners
+    if (iframeCleanupRef.current) {
+      try {
+        iframeCleanupRef.current();
+      } catch (err) {
+        console.warn('Error cleaning up previous iframe events:', err);
+      }
+      iframeCleanupRef.current = null;
+    }
+
     const iframeDoc = iframe.contentDocument;
+
+    // Helper to apply scroll position safely
+    const restoreScroll = () => {
+      const targetTop = iframeScrollRef.current.top;
+      const targetLeft = iframeScrollRef.current.left;
+      
+      if (iframeDoc.documentElement) {
+        iframeDoc.documentElement.scrollTop = targetTop;
+        iframeDoc.documentElement.scrollLeft = targetLeft;
+      }
+      if (iframeDoc.body) {
+        iframeDoc.body.scrollTop = targetTop;
+        iframeDoc.body.scrollLeft = targetLeft;
+      }
+    };
+
+    // Restore scroll position immediately
+    restoreScroll();
+
+    // Schedule progressive restores to ensure layout adjustments are accounted for
+    [10, 50, 100, 200, 350, 500].forEach((delay) => {
+      const timer = window.setTimeout(restoreScroll, delay);
+      iframeTimersRef.current.push(timer);
+    });
+
+    // Reset the reloading flag once the document load/layout settles
+    const reloadTimeout = window.setTimeout(() => {
+      isReloadingRef.current = false;
+    }, 600);
+    iframeTimersRef.current.push(reloadTimeout);
 
     // Intercept Click/Selection
     const handleClick = (e: MouseEvent) => {
@@ -255,6 +312,15 @@ export function Canvas({
     };
 
     const handleScroll = () => {
+      // Do not overwrite scroll reference if the scroll event triggers during a reload or layout shift
+      if (isReloadingRef.current) return;
+      
+      if (iframeDoc.documentElement) {
+        iframeScrollRef.current = {
+          top: iframeDoc.documentElement.scrollTop || iframeDoc.body?.scrollTop || 0,
+          left: iframeDoc.documentElement.scrollLeft || iframeDoc.body?.scrollLeft || 0
+        };
+      }
       updateElementRects();
     };
 
@@ -312,7 +378,8 @@ export function Canvas({
       resizeObserver.observe(iframeDoc.body);
     }
 
-    return () => {
+    // Save cleanup callback
+    iframeCleanupRef.current = () => {
       iframeDoc.removeEventListener('click', handleClick, true);
       iframeDoc.removeEventListener('mouseover', handleMouseOver, true);
       iframeDoc.removeEventListener('mouseout', handleMouseOut, true);
@@ -323,13 +390,19 @@ export function Canvas({
     };
   };
 
+  // Clean up all iframe listeners and timers on component unmount
   useEffect(() => {
-    const iframe = iframeRef.current;
-    if (iframe) {
-      const cleanup = handleIframeLoad();
-      return cleanup;
-    }
-  }, [htmlContent]);
+    return () => {
+      if (iframeCleanupRef.current) {
+        try {
+          iframeCleanupRef.current();
+        } catch (e) {
+          // Ignore unmount errors
+        }
+      }
+      iframeTimersRef.current.forEach(timer => window.clearTimeout(timer));
+    };
+  }, []);
 
   const handleQuickAction = (action: string) => {
     if (!selectedElementId) return;

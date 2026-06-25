@@ -41,7 +41,8 @@ export default function App() {
     project,
     openDirectory,
     saveFile,
-    saveImage
+    saveImage,
+    setProject
   } = useFileSystem();
 
   const [activeHtmlPath, setActiveHtmlPath] = useState<string | null>(null);
@@ -173,10 +174,25 @@ export default function App() {
       setSemanticTree(generateSemanticTree(doc.body));
     }
 
-    // Auto-save cleaned HTML directly to user's disk!
+    // Save in-memory project files state without writing to user's local disk
     if (activeHtmlPath) {
       const cleanHtml = stripEditorIds(newHtml);
-      await saveFile(activeHtmlPath, cleanHtml);
+      
+      setProject(prev => {
+        if (!prev) return null;
+        const fileItem = prev.files[activeHtmlPath];
+        if (!fileItem) return prev;
+        return {
+          ...prev,
+          files: {
+            ...prev.files,
+            [activeHtmlPath]: {
+              ...fileItem,
+              content: cleanHtml
+            }
+          }
+        };
+      });
       
       // Update Version History (limit to 10 entries)
       const now = new Date();
@@ -499,19 +515,28 @@ export default function App() {
     }
   };
 
-  // Manual Export Download
-  const handleManualExport = () => {
+  // Manual Export (Saves back to disk & triggers download)
+  const handleManualExport = async () => {
     if (!htmlContent || !activeHtmlPath) return;
     const cleanHtml = stripEditorIds(htmlContent);
-    const blob = new Blob([cleanHtml], { type: 'text/html' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = activeHtmlPath.split('/').pop() || 'slide.html';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    
+    try {
+      // 1. Write the cleaned HTML back to the user's disk!
+      await saveFile(activeHtmlPath, cleanHtml);
+      
+      // 2. Trigger browser download as a fallback export file
+      const blob = new Blob([cleanHtml], { type: 'text/html' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = activeHtmlPath.split('/').pop() || 'slide.html';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err: any) {
+      console.error('Erro ao salvar/exportar o arquivo:', err);
+    }
   };
 
   // Group element under a styled div container

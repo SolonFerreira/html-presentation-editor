@@ -118,7 +118,14 @@ vi.mock('../hooks/useFileSystem', () => {
       saveFile: vi.fn().mockImplementation(async (path, content) => {
         projectVal.files[path].content = content;
       }),
-      saveImage: vi.fn()
+      saveImage: vi.fn(),
+      setProject: vi.fn().mockImplementation((updater) => {
+        if (typeof updater === 'function') {
+          projectVal = updater(projectVal);
+        } else {
+          projectVal = updater;
+        }
+      })
     })
   };
 });
