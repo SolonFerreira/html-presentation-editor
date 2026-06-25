@@ -1,4 +1,5 @@
 import type { SemanticElement } from '../types';
+import { getAiProvider } from './ai/providers';
 
 export interface StyleMutation {
   elementId: string;
@@ -30,97 +31,13 @@ export async function executeAiEdit(
     return getLocalMockResponse(prompt, semanticTree);
   }
 
-  const systemInstruction = `
-    Você é um assistente de IA especialista em design de interfaces e UX.
-    Sua tarefa é analisar uma árvore semântica de elementos de uma página HTML (representada em JSON) e aplicar modificações localizadas de estilo (CSS inline) ou conteúdo (texto) com base no pedido do usuário.
-    
-    Regras estritas:
-    1. Retorne APENAS um objeto JSON correspondendo ao schema definido.
-    2. Nunca mude a estrutura do documento ou remova tags inteiras a menos que solicitado.
-    3. Prefira mudanças estéticas cirúrgicas (cores, tamanhos de fontes, margens, paddings, bordas, etc.).
-    4. Explique brevemente o que você alterou e por quê na propriedade 'explanation'.
-    5. Referencie os elementos usando o 'id' fornecido (ex: 'el-1', 'el-2').
-  `;
-
-  const requestBody = {
-    contents: [
-      {
-        parts: [
-          {
-            text: `
-              PROMPT DO USUÁRIO: "${prompt}"
-              
-              ÁRVORE SEMÂNTICA DOS ELEMENTOS:
-              ${JSON.stringify(semanticTree, null, 2)}
-            `
-          }
-        ]
-      }
-    ],
-    systemInstruction: {
-      parts: [{ text: systemInstruction }]
-    },
-    generationConfig: {
-      responseMimeType: "application/json",
-      responseSchema: {
-        type: "OBJECT",
-        properties: {
-          explanation: { type: "STRING" },
-          styleMutations: {
-            type: "ARRAY",
-            items: {
-              type: "OBJECT",
-              properties: {
-                elementId: { type: "STRING" },
-                styles: {
-                  type: "OBJECT",
-                  additionalProperties: { type: "STRING" }
-                }
-              },
-              required: ["elementId", "styles"]
-            }
-          },
-          contentMutations: {
-            type: "ARRAY",
-            items: {
-              type: "OBJECT",
-              properties: {
-                elementId: { type: "STRING" },
-                content: { type: "STRING" }
-              },
-              required: ["elementId", "content"]
-            }
-          }
-        },
-        required: ["explanation", "styleMutations", "contentMutations"]
-      }
-    }
-  };
-
   try {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(requestBody)
-    });
-
-    if (!response.ok) {
-      const errData = await response.json();
-      throw new Error(errData.error?.message || `HTTP error! status: ${response.status}`);
-    }
-
-    const data = await response.json();
-    const jsonText = data.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (!jsonText) {
-      throw new Error("Resposta vazia da API do Gemini.");
-    }
-
-    return JSON.parse(jsonText) as AiResponse;
+    // Instantiate provider via abstract factory (default to Gemini for MVP)
+    const provider = getAiProvider('gemini', apiKey);
+    const result = await provider.generateEdits(prompt, semanticTree);
+    return result;
   } catch (error: any) {
-    console.error("Erro na API do Gemini:", error);
+    console.error("Erro no Provedor de IA:", error);
     throw new Error(`Falha na IA: ${error.message || error}`);
   }
 }
