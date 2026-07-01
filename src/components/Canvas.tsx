@@ -1,8 +1,19 @@
-import { useRef, useEffect, useState, useMemo } from 'react';
+import { useRef, useEffect, useState, useMemo, forwardRef, useImperativeHandle } from 'react';
 import { Layout } from 'lucide-react';
 import { SelectionOverlay } from './SelectionOverlay';
 import { ContextualHUD } from './ContextualHUD';
 import type { ViewportMode } from '../types';
+
+export interface CanvasHandle {
+  /**
+   * Applies `mutator` directly to the live, already-mounted iframe document
+   * so the canvas reflects the change instantly without a full reload.
+   * Returns true if a live document was available and the mutation ran.
+   */
+  applyLiveMutation: (mutator: (doc: Document) => void) => boolean;
+  /** Smoothly scrolls the iframe to the element and flashes a highlight. */
+  scrollToElement: (elementId: string) => void;
+}
 
 interface Rect {
   top: number;
@@ -44,7 +55,7 @@ interface CanvasProps {
   presentationMode: boolean;
 }
 
-export function Canvas({
+export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
   htmlContent,
   selectedElementId,
   selectedElementIds = [],
@@ -65,28 +76,68 @@ export function Canvas({
   onGroupElement,
   onInsertComponent,
   onMoveElementToLocation,
-  
+
   zoomScale,
   onZoomChange,
   viewportMode,
   presentationMode
-}: CanvasProps) {
+}: CanvasProps, ref) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const iframeScrollRef = useRef({ top: 0, left: 0 });
-  
+
   // Refs for tracking iframe loading state, timers, and event cleanup
   const isReloadingRef = useRef(false);
   const prevHtmlContentRef = useRef(htmlContent);
   const iframeTimersRef = useRef<number[]>([]);
   const iframeCleanupRef = useRef<(() => void) | null>(null);
 
-  // If htmlContent changes, mark as reloading to block scroll updates from unload/reload events
+  // Tracks whether the upcoming htmlContent change was already applied
+  // directly to the live iframe DOM (via applyLiveMutation), so the reload
+  // logic below can skip remounting the iframe for that change.
+  const pendingLiveSyncRef = useRef(false);
+
+  // Actual srcDoc rendered by the iframe. Decoupled from the `htmlContent`
+  // prop so normal edits (already applied live) don't force a reload —
+  // only genuine document swaps (file switch, undo/redo, rollback, initial
+  // load) update this and remount the iframe.
+  const [srcDoc, setSrcDoc] = useState(htmlContent);
+
   if (prevHtmlContentRef.current !== htmlContent) {
-    isReloadingRef.current = true;
     prevHtmlContentRef.current = htmlContent;
+    if (pendingLiveSyncRef.current) {
+      // Already reflected live in the iframe DOM — no reload needed.
+      pendingLiveSyncRef.current = false;
+    } else {
+      isReloadingRef.current = true;
+      setSrcDoc(htmlContent);
+    }
   }
-  
+
+  useImperativeHandle(ref, () => ({
+    applyLiveMutation: (mutator: (doc: Document) => void) => {
+      const doc = iframeRef.current?.contentDocument;
+      if (!doc) return false;
+      try {
+        mutator(doc);
+        pendingLiveSyncRef.current = true;
+      } catch (err) {
+        console.warn('Falha ao aplicar mutação ao vivo, o canvas será recarregado:', err);
+        return false;
+      }
+      updateElementRects();
+      return true;
+    },
+    scrollToElement: (elementId: string) => {
+      const doc = iframeRef.current?.contentDocument;
+      const el = doc?.querySelector(`[data-editor-id="${elementId}"]`) as HTMLElement | null;
+      if (!el) return;
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      el.classList.add('editor-flash-highlight');
+      window.setTimeout(() => el.classList.remove('editor-flash-highlight'), 900);
+    }
+  }), []);
+
   const [selectedRect, setSelectedRect] = useState<Rect | null>(null);
   const [selectedRects, setSelectedRects] = useState<Rect[]>([]);
   const [hoveredRect, setHoveredRect] = useState<Rect | null>(null);
@@ -1210,7 +1261,7 @@ export function Canvas({
             <iframe
               key="editor-iframe"
               ref={iframeRef}
-              srcDoc={htmlContent}
+              srcDoc={srcDoc}
               className="w-full h-full border-none pointer-events-auto"
               title="HTML presentation preview"
               onLoad={handleIframeLoad}
@@ -1317,4 +1368,4 @@ export function Canvas({
       </div>
     </div>
   );
-}
+});

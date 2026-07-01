@@ -109,3 +109,13 @@ body {
 .interactive-item:active {
   transform: scale(0.98);
 }
+
+/* Momentary highlight on a tree row when its element is selected */
+@keyframes layerRowFlash {
+  0% { background-color: rgba(59, 130, 246, 0.35); }
+  100% { background-color: transparent; }
+}
+
+.layer-row-flash {
+  animation: layerRowFlash 900ms ease-out;
+}

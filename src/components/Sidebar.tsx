@@ -121,13 +121,6 @@ const COMPONENT_LIBRARY = [
           </summary>
           <p style="font-size: 12px; color: #94a3b8; margin-top: 10px; line-height: 1.5;">Ela permite que o editor leia e salve arquivos diretamente no seu disco local de forma 100% client-side, sem necessidade de servidores externos.</p>
         </details>
-        <details style="background-color: #111827; border: 1px solid #1f2937; border-radius: 8px; padding: 16px; cursor: pointer;">
-          <summary style="font-size: 14px; font-weight: 600; color: #ffffff; list-style: none; display: flex; justify-content: space-between; align-items: center;">
-            Onde as chaves de API do Gemini são salvas?
-            <span style="color: #3b82f6;">+</span>
-          </summary>
-          <p style="font-size: 12px; color: #94a3b8; margin-top: 10px; line-height: 1.5;">As chaves de API são armazenadas exclusivamente no localStorage do seu navegador e nunca são transmitidas para qualquer servidor além do próprio Gemini da Google.</p>
-        </details>
       </div>
     `
   },
@@ -255,13 +248,18 @@ export function Sidebar({
   // Search & Filters state
   const [searchQuery, setSearchQuery] = useState('');
   const [filterMode, setFilterMode] = useState<FilterMode>('all');
-  
+
+  // When off (default), the tree groups/hides purely structural wrapper
+  // divs so it reads like a presentation outline instead of the raw DOM.
+  const [showTechnicalTree, setShowTechnicalTree] = useState(false);
+
   // Drag Over state
   const [dragOverId, setDragOverId] = useState<string | null>(null);
   
   // Context Menu state
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; nodeId: string } | null>(null);
   const contextMenuRef = useRef<HTMLDivElement>(null);
+  const treeContainerRef = useRef<HTMLDivElement>(null);
 
   // Close context menu on outside click
   useEffect(() => {
@@ -273,6 +271,43 @@ export function Sidebar({
     window.addEventListener('click', handleOutsideClick);
     return () => window.removeEventListener('click', handleOutsideClick);
   }, [contextMenu]);
+
+  // Whenever the selection changes (from the tree, the canvas, search or the
+  // breadcrumb), make sure the row is visible: expand collapsed ancestors
+  // and switch to the Layers tab so the row actually renders.
+  useEffect(() => {
+    if (!selectedElementId) return;
+    const lineage = getSelectedLineage(semanticTree, selectedElementId);
+    if (!lineage) return;
+    setActiveTab('layers');
+    setCollapsedNodes(prev => {
+      let changed = false;
+      const next = { ...prev };
+      lineage.slice(0, -1).forEach(node => {
+        if (next[node.id]) {
+          next[node.id] = false;
+          changed = true;
+        }
+      });
+      return changed ? next : prev;
+    });
+  }, [selectedElementId, semanticTree]);
+
+  // Once the row is rendered, scroll it into view and flash-highlight it.
+  useEffect(() => {
+    if (!selectedElementId) return;
+    const frame = window.requestAnimationFrame(() => {
+      const container = treeContainerRef.current;
+      if (!container) return;
+      const wrapper = container.querySelector<HTMLElement>(`[data-editor-id="${selectedElementId}"]`);
+      if (!wrapper) return;
+      const row = wrapper.querySelector<HTMLElement>(':scope > .cursor-pointer') || wrapper;
+      row.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      row.classList.add('layer-row-flash');
+      window.setTimeout(() => row.classList.remove('layer-row-flash'), 900);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [selectedElementId]);
 
   const toggleCollapse = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -307,10 +342,15 @@ export function Sidebar({
 
   // Check if a node is visible based on search and filters
   const isNodeVisible = (node: SemanticElement): boolean => {
+    const query = searchQuery.toLowerCase();
     const friendlyName = getFriendlyNodeName(node);
-    const matchesSearch = friendlyName.toLowerCase().includes(searchQuery.toLowerCase()) || 
-      node.id.toLowerCase().includes(searchQuery.toLowerCase());
-    
+    const matchesSearch = !query ? true : (
+      friendlyName.toLowerCase().includes(query) ||
+      node.id.toLowerCase().includes(query) ||
+      (node.text?.toLowerCase().includes(query) ?? false) ||
+      node.classes.some(c => c.toLowerCase().includes(query))
+    );
+
     let matchesFilter = true;
     if (filterMode === 'locked') matchesFilter = !!node.isLocked;
     else if (filterMode === 'hidden') matchesFilter = !!node.isHidden;
@@ -366,9 +406,9 @@ export function Sidebar({
 
   const isTechnicalNode = (node: SemanticElement): boolean => {
     const tagName = node.tagName.toLowerCase();
-    if ((tagName === 'div' || tagName === 'span') && 
-        node.classes.length === 0 && 
-        !node.label && 
+    if ((tagName === 'div' || tagName === 'span') &&
+        node.classes.length === 0 &&
+        !node.label &&
         (!node.text || node.text.trim().length === 0) &&
         node.role === 'unknown') {
       return true;
@@ -376,9 +416,20 @@ export function Sidebar({
     return false;
   };
 
+  // A pass-through wrapper: a generic container/section with no custom
+  // label and a single child, adding no structure worth showing on its own.
+  // Skipped in the default "grouped" tree view so the sidebar reads like a
+  // presentation outline (Hero, Introdução, ...) instead of the raw DOM.
+  const isPassthroughNode = (node: SemanticElement): boolean => {
+    if (showTechnicalTree) return false;
+    if (isTechnicalNode(node)) return true;
+    const isGroupableRole = node.role === 'container' || node.role === 'section' || node.role === 'unknown';
+    return isGroupableRole && !node.label && node.children.length === 1;
+  };
+
   // Render tree item recursively
   const renderLayerItem = (node: SemanticElement, depth = 0): React.ReactNode => {
-    if (isTechnicalNode(node)) {
+    if (isPassthroughNode(node)) {
       return (
         <>
           {node.children.map(child => renderLayerItem(child, depth))}
@@ -390,7 +441,9 @@ export function Sidebar({
 
     const isSelected = selectedElementIds.includes(node.id);
     const isHovered = hoveredElementId === node.id;
-    const isCollapsed = !!collapsedNodes[node.id];
+    // While searching, ignore manual collapse state so matches nested under
+    // a collapsed branch are still reachable.
+    const isCollapsed = searchQuery ? false : !!collapsedNodes[node.id];
     const hasChildren = node.children && node.children.length > 0;
     const isRenameActive = renamingId === node.id;
     const isDragOver = dragOverId === node.id;
@@ -619,14 +672,21 @@ export function Sidebar({
             Camadas do slide
           </span>
           <div className="flex items-center gap-2">
-            <button 
+            <button
+              onClick={() => setShowTechnicalTree(prev => !prev)}
+              className={`p-1 rounded cursor-pointer ${showTechnicalTree ? 'text-blue-400 bg-blue-500/10' : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800'}`}
+              title={showTechnicalTree ? 'Ver estrutura simplificada' : 'Ver estrutura técnica'}
+            >
+              <Code className="w-3 h-3" />
+            </button>
+            <button
               onClick={handleExpandAll}
               className="p-1 hover:bg-slate-800 rounded text-slate-500 hover:text-slate-300 cursor-pointer"
               title="Expandir Tudo"
             >
               <Maximize2 className="w-3 h-3" />
             </button>
-            <button 
+            <button
               onClick={handleCollapseAll}
               className="p-1 hover:bg-slate-800 rounded text-slate-500 hover:text-slate-300 cursor-pointer"
               title="Recolher Tudo"
@@ -680,7 +740,7 @@ export function Sidebar({
       )}
 
       {/* 5. Main content layers tree */}
-      <div className="flex-1 overflow-y-auto">
+      <div ref={treeContainerRef} className="flex-1 overflow-y-auto">
         {activeTab === 'layers' && (
           <div className="p-2 space-y-0.5">
             {semanticTree.length === 0 ? (

@@ -1,17 +1,15 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useFileSystem } from './hooks/useFileSystem';
 import { Sidebar } from './components/Sidebar';
-import { DiffReviewModal } from './components/DiffReviewModal';
 import { Canvas } from './components/Canvas';
-import { AIPanel } from './components/AIPanel';
-import { 
-  injectEditorIds, 
-  stripEditorIds, 
-  generateSemanticTree, 
+import type { CanvasHandle } from './components/Canvas';
+import {
+  injectEditorIds,
+  stripEditorIds,
+  generateSemanticTree,
   prepareHtmlForPreview,
   getMaxEditorId
 } from './utils/domHelper';
-import { executeAiEdit } from './utils/aiClient';
 import type { SemanticElement, ViewportMode, VersionEntry } from './types';
 import { 
   FolderOpen, 
@@ -47,7 +45,8 @@ export default function App() {
 
   const [activeHtmlPath, setActiveHtmlPath] = useState<string | null>(null);
   const [htmlContent, setHtmlContent] = useState<string>(''); // HTML containing data-editor-id
-  
+  const canvasRef = useRef<CanvasHandle>(null);
+
   const [selectedElementIds, setSelectedElementIds] = useState<string[]>([]);
   const selectedElementId = selectedElementIds[0] || null;
   const setSelectedElementId = (id: string | null) => {
@@ -66,26 +65,6 @@ export default function App() {
   const [redoStack, setRedoStack] = useState<string[]>([]);
   const [versionHistory, setVersionHistory] = useState<VersionEntry[]>([]);
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
-
-  // AI & API States
-  const [apiKey, setApiKey] = useState(() => localStorage.getItem('gemini_api_key') || '');
-  const [aiLoading, setAiLoading] = useState(false);
-  const [aiExplanation, setAiExplanation] = useState('');
-  
-  // Pending changes for Diff Review (Approval Queue)
-  const [pendingChanges, setPendingChanges] = useState<{
-    explanation: string;
-    styleMutations: any[];
-    contentMutations: any[];
-    originalHtml: string;
-  } | null>(null);
-  const [isDiffModalOpen, setIsDiffModalOpen] = useState(false);
-
-  // Persist API Key
-  const handleSaveApiKey = (key: string) => {
-    setApiKey(key);
-    localStorage.setItem('gemini_api_key', key);
-  };
 
   // Find active file and load it
   const handleSelectFile = (path: string) => {
@@ -108,8 +87,6 @@ export default function App() {
       setHoveredElementId(null);
       setUndoStack([]);
       setRedoStack([]);
-      setAiExplanation('');
-      setPendingChanges(null);
 
       // Create initial version entry
       const now = new Date();
@@ -139,6 +116,16 @@ export default function App() {
       });
     } else {
       setSelectedElementIds([id]);
+    }
+  };
+
+  // Selection triggered from a panel (tree, search, breadcrumb, command
+  // palette) also scrolls the canvas to the element and flashes it — a
+  // direct canvas click doesn't need to re-center itself.
+  const handleSelectElementFromPanel = (id: string | null, isMulti = false) => {
+    handleSelectElement(id, isMulti);
+    if (id) {
+      canvasRef.current?.scrollToElement(id);
     }
   };
 
@@ -223,57 +210,78 @@ export default function App() {
     }
   };
 
+  // Applies `mutator` to the live iframe DOM (for instant, flicker-free
+  // feedback) and, separately, to a fresh offscreen parse of the canonical
+  // `htmlContent` string (used for undo/history/persistence). `mutator`
+  // must be a pure DOM mutation keyed off data-editor-id and must return
+  // the number of elements it affected, so callers can skip no-op updates.
+  const applyMutation = async (
+    mutator: (doc: Document) => number,
+    describe: (count: number, doc: Document) => string,
+    pushToUndo = true
+  ): Promise<number> => {
+    canvasRef.current?.applyLiveMutation(mutator);
+
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(htmlContent, 'text/html');
+    const count = mutator(doc);
+
+    if (count > 0) {
+      await updateHtml(doc.documentElement.outerHTML, describe(count, doc), pushToUndo);
+    }
+    return count;
+  };
+
   // Modify Element Styles
   const handleUpdateStyles = async (elementId: string, styles: Record<string, string>) => {
     const idsToUpdate = selectedElementIds.includes(elementId)
       ? selectedElementIds
       : [elementId];
 
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(htmlContent, 'text/html');
-    let updatedCount = 0;
+    await applyMutation(
+      (doc) => {
+        let updatedCount = 0;
+        idsToUpdate.forEach(id => {
+          const el = doc.querySelector(`[data-editor-id="${id}"]`);
+          if (el) {
+            const htmlEl = el as HTMLElement;
+            Object.entries(styles).forEach(([key, value]) => {
+              const attributeKeys = ['src', 'id', 'title', 'href', 'target', 'alt', 'role', 'aria-label', 'class', 'className'];
+              const isAttribute = attributeKeys.includes(key) || key.startsWith('aria-') || key.startsWith('data-');
 
-    idsToUpdate.forEach(id => {
-      const el = doc.querySelector(`[data-editor-id="${id}"]`);
-      if (el) {
-        const htmlEl = el as HTMLElement;
-        Object.entries(styles).forEach(([key, value]) => {
-          const attributeKeys = ['src', 'id', 'title', 'href', 'target', 'alt', 'role', 'aria-label', 'class', 'className'];
-          const isAttribute = attributeKeys.includes(key) || key.startsWith('aria-') || key.startsWith('data-');
-          
-          if (isAttribute) {
-            const attrName = key === 'className' ? 'class' : key;
-            if (value === '') {
-              htmlEl.removeAttribute(attrName);
-            } else {
-              htmlEl.setAttribute(attrName, value);
-            }
-          } else {
-            htmlEl.style[key as any] = value;
+              if (isAttribute) {
+                const attrName = key === 'className' ? 'class' : key;
+                if (value === '') {
+                  htmlEl.removeAttribute(attrName);
+                } else {
+                  htmlEl.setAttribute(attrName, value);
+                }
+              } else {
+                htmlEl.style[key as any] = value;
+              }
+            });
+            updatedCount++;
           }
         });
-        updatedCount++;
-      }
-    });
-
-    if (updatedCount > 0) {
-      const desc = updatedCount === 1 
-        ? `Ajustou estilo de ${doc.querySelector(`[data-editor-id="${elementId}"]`)?.tagName.toLowerCase() || 'elemento'}`
-        : `Ajustou estilos de ${updatedCount} elementos`;
-      await updateHtml(doc.documentElement.outerHTML, desc);
-    }
+        return updatedCount;
+      },
+      (updatedCount) => updatedCount === 1
+        ? `Ajustou estilo`
+        : `Ajustou estilos de ${updatedCount} elementos`
+    );
   };
 
   // Modify Element Text
   const handleUpdateText = async (elementId: string, text: string) => {
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(htmlContent, 'text/html');
-    const el = doc.querySelector(`[data-editor-id="${elementId}"]`);
-
-    if (el) {
-      el.textContent = text;
-      await updateHtml(doc.documentElement.outerHTML, `Editou texto em ${el.tagName.toLowerCase()}`);
-    }
+    await applyMutation(
+      (doc) => {
+        const el = doc.querySelector(`[data-editor-id="${elementId}"]`);
+        if (!el) return 0;
+        el.textContent = text;
+        return 1;
+      },
+      () => `Alterou texto`
+    );
   };
 
   // Delete Element
@@ -282,21 +290,23 @@ export default function App() {
       ? selectedElementIds
       : [elementId];
 
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(htmlContent, 'text/html');
-    let deleteCount = 0;
-
-    idsToDelete.forEach(id => {
-      const el = doc.querySelector(`[data-editor-id="${id}"]`);
-      if (el) {
-        el.remove();
-        deleteCount++;
-      }
-    });
+    const deleteCount = await applyMutation(
+      (doc) => {
+        let count = 0;
+        idsToDelete.forEach(id => {
+          const el = doc.querySelector(`[data-editor-id="${id}"]`);
+          if (el) {
+            el.remove();
+            count++;
+          }
+        });
+        return count;
+      },
+      (count) => `Removeu ${count} elemento(s)`
+    );
 
     if (deleteCount > 0) {
       setSelectedElementIds([]);
-      await updateHtml(doc.documentElement.outerHTML, `Removeu ${deleteCount} elemento(s)`);
     }
   };
 
@@ -306,105 +316,35 @@ export default function App() {
       ? selectedElementIds
       : [elementId];
 
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(htmlContent, 'text/html');
-    let updatedCount = 0;
+    await applyMutation(
+      (doc) => {
+        let updatedCount = 0;
+        idsToUpdate.forEach(id => {
+          const el = doc.querySelector(`[data-editor-id="${id}"]`) as HTMLElement;
+          if (el) {
+            let num = 16;
+            let unit = 'px';
 
-    idsToUpdate.forEach(id => {
-      const el = doc.querySelector(`[data-editor-id="${id}"]`) as HTMLElement;
-      if (el) {
-        let num = 16;
-        let unit = 'px';
+            const styleSize = el.style.fontSize;
+            if (styleSize) {
+              const match = styleSize.match(/^(\d+(?:\.\d+)?)(px|rem|em|%|pt)$/);
+              if (match) {
+                num = parseFloat(match[1]);
+                unit = match[2];
+              }
+            }
 
-        const styleSize = el.style.fontSize;
-        if (styleSize) {
-          const match = styleSize.match(/^(\d+(?:\.\d+)?)(px|rem|em|%|pt)$/);
-          if (match) {
-            num = parseFloat(match[1]);
-            unit = match[2];
+            const diff = unit === 'px' ? 2 : 0.1;
+            const newSize = direction === 'up' ? num + diff : Math.max(8, num - diff);
+
+            el.style.fontSize = `${newSize}${unit}`;
+            updatedCount++;
           }
-        }
-
-        const diff = unit === 'px' ? 2 : 0.1;
-        const newSize = direction === 'up' ? num + diff : Math.max(8, num - diff);
-        
-        el.style.fontSize = `${newSize}${unit}`;
-        updatedCount++;
-      }
-    });
-
-    if (updatedCount > 0) {
-      await updateHtml(doc.documentElement.outerHTML, `Ajustou tamanho fonte de ${updatedCount} elemento(s)`);
-    }
-  };
-
-  // Send Prompt to Gemini AI and load in Diff Review Queue (instead of auto-applying)
-  const handleSendPrompt = async (prompt: string) => {
-    if (!htmlContent) return;
-    
-    setAiLoading(true);
-    setAiExplanation('IA pensando...');
-    
-    try {
-      const aiResponse = await executeAiEdit(prompt, semanticTree, apiKey);
-      
-      // Store in pending changes for User Diff Review approval!
-      setPendingChanges({
-        explanation: aiResponse.explanation,
-        styleMutations: aiResponse.styleMutations,
-        contentMutations: aiResponse.contentMutations,
-        originalHtml: htmlContent
-      });
-      setIsDiffModalOpen(true);
-      setAiExplanation('Aguardando aprovação das alterações...');
-    } catch (err: any) {
-      console.error(err);
-      setAiExplanation(`Erro: ${err.message || err}`);
-    } finally {
-      setAiLoading(false);
-    }
-  };
-
-  // Apply Changes from AI Diff Review queue
-  const handleApplyChanges = async () => {
-    if (!pendingChanges) return;
-
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(pendingChanges.originalHtml, 'text/html');
-    
-    let mutationCount = 0;
-
-    // 1. Apply styles
-    pendingChanges.styleMutations.forEach(mut => {
-      const el = doc.querySelector(`[data-editor-id="${mut.elementId}"]`) as HTMLElement;
-      if (el) {
-        Object.entries(mut.styles).forEach(([key, val]) => {
-          el.style[key as any] = val as string;
         });
-        mutationCount++;
-      }
-    });
-
-    // 2. Apply contents
-    pendingChanges.contentMutations.forEach(mut => {
-      const el = doc.querySelector(`[data-editor-id="${mut.elementId}"]`);
-      if (el) {
-        el.textContent = mut.content;
-        mutationCount++;
-      }
-    });
-
-    if (mutationCount > 0) {
-      await updateHtml(doc.documentElement.outerHTML, `Ajustes aplicados por IA`, true);
-      setAiExplanation('Ajustes aplicados com sucesso!');
-    }
-    setPendingChanges(null);
-  };
-
-  // Discard changes from AI Diff Review queue
-  const handleCancelChanges = () => {
-    setPendingChanges(null);
-    setAiExplanation('Ajustes propostos pela IA descartados.');
+        return updatedCount;
+      },
+      (updatedCount) => `Ajustou tamanho fonte de ${updatedCount} elemento(s)`
+    );
   };
 
   // Standard Undo / Redo Actions
@@ -444,53 +384,78 @@ export default function App() {
 
   // LAYERS PANEL ACTIONS (Lock, Hide, Duplicate, Delete, Reorder, Rename)
   const handleToggleLock = async (elementId: string) => {
+    // Decide the target state once, up front, so the mutator applied to
+    // both the live iframe and the offscreen doc is a pure "set to X".
     const parser = new DOMParser();
-    const doc = parser.parseFromString(htmlContent, 'text/html');
-    const el = doc.querySelector(`[data-editor-id="${elementId}"]`);
-    if (el) {
-      const isLocked = el.getAttribute('data-editor-locked') === 'true';
-      if (isLocked) {
-        el.removeAttribute('data-editor-locked');
-      } else {
-        el.setAttribute('data-editor-locked', 'true');
-        if (selectedElementId === elementId) setSelectedElementId(null);
-      }
-      await updateHtml(doc.documentElement.outerHTML, `${isLocked ? 'Desbloqueou' : 'Bloqueou'} ${el.tagName.toLowerCase()}`);
+    const currentDoc = parser.parseFromString(htmlContent, 'text/html');
+    const currentEl = currentDoc.querySelector(`[data-editor-id="${elementId}"]`);
+    if (!currentEl) return;
+    const wasLocked = currentEl.getAttribute('data-editor-locked') === 'true';
+
+    const count = await applyMutation(
+      (doc) => {
+        const el = doc.querySelector(`[data-editor-id="${elementId}"]`);
+        if (!el) return 0;
+        if (wasLocked) {
+          el.removeAttribute('data-editor-locked');
+        } else {
+          el.setAttribute('data-editor-locked', 'true');
+        }
+        return 1;
+      },
+      () => wasLocked ? 'Desbloqueou elemento' : 'Bloqueou elemento'
+    );
+
+    if (count > 0 && !wasLocked && selectedElementId === elementId) {
+      setSelectedElementId(null);
     }
   };
 
   const handleToggleHide = async (elementId: string) => {
     const parser = new DOMParser();
-    const doc = parser.parseFromString(htmlContent, 'text/html');
-    const el = doc.querySelector(`[data-editor-id="${elementId}"]`);
-    if (el) {
-      const isHidden = el.getAttribute('data-editor-hidden') === 'true';
-      if (isHidden) {
-        el.removeAttribute('data-editor-hidden');
-      } else {
-        el.setAttribute('data-editor-hidden', 'true');
-        if (selectedElementId === elementId) setSelectedElementId(null);
-      }
-      await updateHtml(doc.documentElement.outerHTML, `${isHidden ? 'Exibiu' : 'Ocultou'} ${el.tagName.toLowerCase()}`);
+    const currentDoc = parser.parseFromString(htmlContent, 'text/html');
+    const currentEl = currentDoc.querySelector(`[data-editor-id="${elementId}"]`);
+    if (!currentEl) return;
+    const wasHidden = currentEl.getAttribute('data-editor-hidden') === 'true';
+
+    const count = await applyMutation(
+      (doc) => {
+        const el = doc.querySelector(`[data-editor-id="${elementId}"]`);
+        if (!el) return 0;
+        if (wasHidden) {
+          el.removeAttribute('data-editor-hidden');
+        } else {
+          el.setAttribute('data-editor-hidden', 'true');
+        }
+        return 1;
+      },
+      () => wasHidden ? 'Exibiu elemento' : 'Ocultou elemento'
+    );
+
+    if (count > 0 && !wasHidden && selectedElementId === elementId) {
+      setSelectedElementId(null);
     }
   };
 
   const handleDuplicateElement = async (elementId: string) => {
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(htmlContent, 'text/html');
-    const el = doc.querySelector(`[data-editor-id="${elementId}"]`);
-    if (el && el.parentElement) {
-      const clone = el.cloneNode(true) as HTMLElement;
-      // Ingest new editor ids recursively starting from max + 1
-      const startId = getMaxEditorId(htmlContent) + 1;
-      const clonedHtml = injectEditorIds(clone.outerHTML, startId);
-      const parsedCloneDoc = parser.parseFromString(clonedHtml, 'text/html');
-      const cleanClone = parsedCloneDoc.body.firstElementChild;
-      if (cleanClone) {
+    // Computed once from the canonical string so both the live and
+    // offscreen mutations assign identical new editor ids.
+    const startId = getMaxEditorId(htmlContent) + 1;
+
+    await applyMutation(
+      (doc) => {
+        const el = doc.querySelector(`[data-editor-id="${elementId}"]`);
+        if (!el || !el.parentElement) return 0;
+        const clone = el.cloneNode(true) as HTMLElement;
+        const clonedHtml = injectEditorIds(clone.outerHTML, startId);
+        const parsedCloneDoc = new DOMParser().parseFromString(clonedHtml, 'text/html');
+        const cleanClone = parsedCloneDoc.body.firstElementChild;
+        if (!cleanClone) return 0;
         el.parentNode?.insertBefore(cleanClone, el.nextSibling);
-        await updateHtml(doc.documentElement.outerHTML, `Duplicou ${el.tagName.toLowerCase()}`);
-      }
-    }
+        return 1;
+      },
+      () => `Duplicou elemento`
+    );
   };
 
   const handleInsertPresetComponent = async (elementId: string | null, componentType: string) => {
@@ -625,74 +590,83 @@ export default function App() {
     const template = templates[componentType];
     if (!template) return;
 
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(htmlContent, 'text/html');
     const startId = getMaxEditorId(htmlContent) + 1;
     const templateWithIds = injectEditorIds(template, startId);
-    
-    const parsedTemplateDoc = parser.parseFromString(templateWithIds, 'text/html');
-    const cleanComponent = parsedTemplateDoc.body.firstElementChild;
-    
-    if (!cleanComponent) return;
 
-    if (elementId) {
-      const el = doc.querySelector(`[data-editor-id="${elementId}"]`);
-      if (el) {
-        const tagNameLower = el.tagName.toLowerCase();
-        const isContainer = ['div', 'section', 'article', 'header', 'footer', 'main', 'body'].includes(tagNameLower);
-        
-        if (isContainer) {
-          el.appendChild(cleanComponent);
+    await applyMutation(
+      (doc) => {
+        const parsedTemplateDoc = new DOMParser().parseFromString(templateWithIds, 'text/html');
+        const cleanComponent = parsedTemplateDoc.body.firstElementChild;
+        if (!cleanComponent) return 0;
+
+        if (elementId) {
+          const el = doc.querySelector(`[data-editor-id="${elementId}"]`);
+          if (!el) return 0;
+          const tagNameLower = el.tagName.toLowerCase();
+          const isContainer = ['div', 'section', 'article', 'header', 'footer', 'main', 'body'].includes(tagNameLower);
+
+          if (isContainer) {
+            el.appendChild(cleanComponent);
+          } else {
+            el.parentNode?.insertBefore(cleanComponent, el.nextSibling);
+          }
         } else {
-          el.parentNode?.insertBefore(cleanComponent, el.nextSibling);
+          doc.body.appendChild(cleanComponent);
         }
-        await updateHtml(doc.documentElement.outerHTML, `Inseriu Componente ${componentType} em ${el.tagName.toLowerCase()}`);
-      }
-    } else {
-      doc.body.appendChild(cleanComponent);
-      await updateHtml(doc.documentElement.outerHTML, `Inseriu Componente ${componentType} no Corpo`);
-    }
+        return 1;
+      },
+      () => elementId
+        ? `Inseriu componente ${componentType}`
+        : `Inseriu componente ${componentType} no slide`
+    );
   };
 
   const handleReorderElement = async (elementId: string, direction: 'up' | 'down') => {
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(htmlContent, 'text/html');
-    const el = doc.querySelector(`[data-editor-id="${elementId}"]`);
-    if (el && el.parentElement) {
-      const parent = el.parentElement;
-      if (direction === 'up' && el.previousElementSibling) {
-        parent.insertBefore(el, el.previousElementSibling);
-      } else if (direction === 'down' && el.nextElementSibling) {
-        parent.insertBefore(el.nextElementSibling, el);
-      }
-      await updateHtml(doc.documentElement.outerHTML, `Reordenou camada ${el.tagName.toLowerCase()}`);
-    }
+    await applyMutation(
+      (doc) => {
+        const el = doc.querySelector(`[data-editor-id="${elementId}"]`);
+        if (!el || !el.parentElement) return 0;
+        const parent = el.parentElement;
+        if (direction === 'up' && el.previousElementSibling) {
+          parent.insertBefore(el, el.previousElementSibling);
+        } else if (direction === 'down' && el.nextElementSibling) {
+          parent.insertBefore(el.nextElementSibling, el);
+        } else {
+          return 0;
+        }
+        return 1;
+      },
+      () => `Reordenou camada`
+    );
   };
 
   const handleRenameElement = async (elementId: string, newName: string) => {
     // Standard elements don't store labels, so we can save it as an attribute
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(htmlContent, 'text/html');
-    const el = doc.querySelector(`[data-editor-id="${elementId}"]`);
-    if (el) {
-      el.setAttribute('data-editor-label', newName);
-      await updateHtml(doc.documentElement.outerHTML, `Renomeou camada para ${newName}`);
-    }
+    await applyMutation(
+      (doc) => {
+        const el = doc.querySelector(`[data-editor-id="${elementId}"]`);
+        if (!el) return 0;
+        el.setAttribute('data-editor-label', newName);
+        return 1;
+      },
+      () => `Renomeou camada para ${newName}`
+    );
   };
 
   const handleMoveElement = async (draggedId: string, targetId: string) => {
     if (draggedId === targetId) return;
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(htmlContent, 'text/html');
-    const draggedEl = doc.querySelector(`[data-editor-id="${draggedId}"]`);
-    const targetEl = doc.querySelector(`[data-editor-id="${targetId}"]`);
-    
-    if (draggedEl && targetEl && targetEl.parentElement) {
-      if (draggedEl.contains(targetEl)) return; // Prevent infinite cycle
-      const parent = targetEl.parentElement;
-      parent.insertBefore(draggedEl, targetEl);
-      await updateHtml(doc.documentElement.outerHTML, `Moveu elemento ${draggedEl.tagName.toLowerCase()}`);
-    }
+
+    await applyMutation(
+      (doc) => {
+        const draggedEl = doc.querySelector(`[data-editor-id="${draggedId}"]`);
+        const targetEl = doc.querySelector(`[data-editor-id="${targetId}"]`);
+        if (!draggedEl || !targetEl || !targetEl.parentElement) return 0;
+        if (draggedEl.contains(targetEl)) return 0; // Prevent infinite cycle
+        targetEl.parentElement.insertBefore(draggedEl, targetEl);
+        return 1;
+      },
+      () => `Moveu elemento`
+    );
   };
 
   const handleMoveElementToLocation = async (
@@ -706,174 +680,189 @@ export default function App() {
 
     if (idsToMove.includes(targetId)) return; // Prevent target from being moved into itself
 
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(htmlContent, 'text/html');
-    const targetEl = doc.querySelector(`[data-editor-id="${targetId}"]`);
-    
-    if (targetEl) {
-      // Filter out nested selections (e.g. if parent and child are both selected, only move parent!)
-      const rootIdsToMove = idsToMove.filter(id => {
-        const el = doc.querySelector(`[data-editor-id="${id}"]`);
-        if (!el) return false;
-        let parent = el.parentElement;
-        while (parent) {
-          const pId = parent.getAttribute('data-editor-id');
-          if (pId && idsToMove.includes(pId)) return false;
-          parent = parent.parentElement;
-        }
-        return true;
-      });
+    await applyMutation(
+      (doc) => {
+        const targetEl = doc.querySelector(`[data-editor-id="${targetId}"]`);
+        if (!targetEl) return 0;
 
-      let insertPosRef = targetEl;
-      rootIdsToMove.forEach(id => {
-        const draggedEl = doc.querySelector(`[data-editor-id="${id}"]`);
-        if (draggedEl) {
-          // Verify draggedEl is not an ancestor of targetEl to avoid cycle
-          if (draggedEl.contains(targetEl)) return;
-
-          if (position === 'inside') {
-            targetEl.appendChild(draggedEl);
-          } else if (position === 'before') {
-            targetEl.parentNode?.insertBefore(draggedEl, insertPosRef);
-          } else if (position === 'after') {
-            targetEl.parentNode?.insertBefore(draggedEl, insertPosRef.nextSibling);
-            insertPosRef = draggedEl; // Advance reference to maintain relative selection order
+        // Filter out nested selections (e.g. if parent and child are both selected, only move parent!)
+        const rootIdsToMove = idsToMove.filter(id => {
+          const el = doc.querySelector(`[data-editor-id="${id}"]`);
+          if (!el) return false;
+          let parent = el.parentElement;
+          while (parent) {
+            const pId = parent.getAttribute('data-editor-id');
+            if (pId && idsToMove.includes(pId)) return false;
+            parent = parent.parentElement;
           }
-        }
-      });
+          return true;
+        });
 
-      const posLabel = position === 'inside' ? 'dentro de' : position === 'before' ? 'antes de' : 'depois de';
-      await updateHtml(
-        doc.documentElement.outerHTML,
-        `Moveu ${rootIdsToMove.length} elemento(s) para ${posLabel} ${targetEl.tagName.toLowerCase()}`
-      );
-    }
+        let insertPosRef = targetEl;
+        rootIdsToMove.forEach(id => {
+          const draggedEl = doc.querySelector(`[data-editor-id="${id}"]`);
+          if (draggedEl) {
+            // Verify draggedEl is not an ancestor of targetEl to avoid cycle
+            if (draggedEl.contains(targetEl)) return;
+
+            if (position === 'inside') {
+              targetEl.appendChild(draggedEl);
+            } else if (position === 'before') {
+              targetEl.parentNode?.insertBefore(draggedEl, insertPosRef);
+            } else if (position === 'after') {
+              targetEl.parentNode?.insertBefore(draggedEl, insertPosRef.nextSibling);
+              insertPosRef = draggedEl; // Advance reference to maintain relative selection order
+            }
+          }
+        });
+
+        return rootIdsToMove.length;
+      },
+      (count, doc) => {
+        const posLabel = position === 'inside' ? 'dentro de' : position === 'before' ? 'antes de' : 'depois de';
+        const targetTag = doc.querySelector(`[data-editor-id="${targetId}"]`)?.tagName.toLowerCase() || 'elemento';
+        return `Moveu ${count} elemento(s) para ${posLabel} ${targetTag}`;
+      }
+    );
   };
 
   const handleUnwrapElement = async (elementId: string) => {
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(htmlContent, 'text/html');
-    const el = doc.querySelector(`[data-editor-id="${elementId}"]`);
-    if (el && el.parentElement) {
-      const parent = el.parentElement;
-      while (el.firstChild) {
-        parent.insertBefore(el.firstChild, el);
-      }
-      el.remove();
-      setSelectedElementId(null);
-      await updateHtml(doc.documentElement.outerHTML, `Desagrupou elemento`);
-    }
+    const count = await applyMutation(
+      (doc) => {
+        const el = doc.querySelector(`[data-editor-id="${elementId}"]`);
+        if (!el || !el.parentElement) return 0;
+        const parent = el.parentElement;
+        while (el.firstChild) {
+          parent.insertBefore(el.firstChild, el);
+        }
+        el.remove();
+        return 1;
+      },
+      () => `Desagrupou elemento`
+    );
+    if (count > 0) setSelectedElementId(null);
   };
 
   const handleWrapElement = async (elementId: string, tag: 'div' | 'section') => {
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(htmlContent, 'text/html');
-    const el = doc.querySelector(`[data-editor-id="${elementId}"]`);
-    if (el && el.parentElement) {
-      const parent = el.parentElement;
-      const wrapEl = doc.createElement(tag);
-      const startId = getMaxEditorId(htmlContent) + 1;
-      wrapEl.setAttribute('data-editor-id', `el-${startId}`);
-      wrapEl.setAttribute('data-editor-label', tag === 'div' ? 'Div Wrapper' : 'Section Wrapper');
-      
-      parent.insertBefore(wrapEl, el);
-      wrapEl.appendChild(el);
-      
-      await updateHtml(doc.documentElement.outerHTML, `Envolveu em ${tag}`);
-      setSelectedElementId(`el-${startId}`);
-    }
+    const startId = getMaxEditorId(htmlContent) + 1;
+
+    const count = await applyMutation(
+      (doc) => {
+        const el = doc.querySelector(`[data-editor-id="${elementId}"]`);
+        if (!el || !el.parentElement) return 0;
+        const parent = el.parentElement;
+        const wrapEl = doc.createElement(tag);
+        wrapEl.setAttribute('data-editor-id', `el-${startId}`);
+        wrapEl.setAttribute('data-editor-label', tag === 'div' ? 'Div Wrapper' : 'Section Wrapper');
+
+        parent.insertBefore(wrapEl, el);
+        wrapEl.appendChild(el);
+        return 1;
+      },
+      () => `Envolveu em ${tag}`
+    );
+    if (count > 0) setSelectedElementId(`el-${startId}`);
   };
 
   const handleChangeElementTag = async (elementId: string, newTagName: string) => {
+    const newTagNameUpper = newTagName.toUpperCase();
+
+    // Validation check for tags nesting — done once, up front, against the
+    // canonical HTML so the alert doesn't fire twice.
     const parser = new DOMParser();
-    const doc = parser.parseFromString(htmlContent, 'text/html');
-    const el = doc.querySelector(`[data-editor-id="${elementId}"]`);
-    if (el && el.parentElement) {
-      const parent = el.parentElement;
-      const newTagNameUpper = newTagName.toUpperCase();
-      
-      // Validation check for tags nesting
-      if (newTagNameUpper === 'P' && Array.from(el.querySelectorAll('div, section, p, table, form')).length > 0) {
-        alert('Não é possível converter para <p> porque o elemento possui blocos como div/section que invalidariam a hierarquia HTML.');
-        return;
-      }
-      
-      const newEl = doc.createElement(newTagNameUpper);
-      
-      // Copy attributes
-      for (const attr of Array.from(el.attributes)) {
-        newEl.setAttribute(attr.name, attr.value);
-      }
-      
-      // Conversion rules
-      if (newTagNameUpper === 'BUTTON') {
-        newEl.removeAttribute('href');
-        newEl.removeAttribute('target');
-      } else if (newTagNameUpper === 'A') {
-        if (!newEl.hasAttribute('href')) {
-          newEl.setAttribute('href', '#');
-        }
-      }
-      
-      // Move children
-      while (el.firstChild) {
-        newEl.appendChild(el.firstChild);
-      }
-      
-      parent.replaceChild(newEl, el);
-      await updateHtml(doc.documentElement.outerHTML, `Alterou tag para ${newTagName.toLowerCase()}`);
+    const checkDoc = parser.parseFromString(htmlContent, 'text/html');
+    const checkEl = checkDoc.querySelector(`[data-editor-id="${elementId}"]`);
+    if (!checkEl || !checkEl.parentElement) return;
+    if (newTagNameUpper === 'P' && Array.from(checkEl.querySelectorAll('div, section, p, table, form')).length > 0) {
+      alert('Não é possível converter para <p> porque o elemento possui blocos como div/section que invalidariam a hierarquia HTML.');
+      return;
     }
+
+    await applyMutation(
+      (doc) => {
+        const el = doc.querySelector(`[data-editor-id="${elementId}"]`);
+        if (!el || !el.parentElement) return 0;
+        const parent = el.parentElement;
+        const newEl = doc.createElement(newTagNameUpper);
+
+        // Copy attributes
+        for (const attr of Array.from(el.attributes)) {
+          newEl.setAttribute(attr.name, attr.value);
+        }
+
+        // Conversion rules
+        if (newTagNameUpper === 'BUTTON') {
+          newEl.removeAttribute('href');
+          newEl.removeAttribute('target');
+        } else if (newTagNameUpper === 'A') {
+          if (!newEl.hasAttribute('href')) {
+            newEl.setAttribute('href', '#');
+          }
+        }
+
+        // Move children
+        while (el.firstChild) {
+          newEl.appendChild(el.firstChild);
+        }
+
+        parent.replaceChild(newEl, el);
+        return 1;
+      },
+      () => `Alterou tag para ${newTagName.toLowerCase()}`
+    );
   };
 
   const handleClearElementStyles = async (elementId: string) => {
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(htmlContent, 'text/html');
-    const el = doc.querySelector(`[data-editor-id="${elementId}"]`);
-    if (el) {
-      el.removeAttribute('style');
-      await updateHtml(doc.documentElement.outerHTML, `Limpou estilos de ${el.tagName.toLowerCase()}`);
-    }
+    await applyMutation(
+      (doc) => {
+        const el = doc.querySelector(`[data-editor-id="${elementId}"]`);
+        if (!el) return 0;
+        el.removeAttribute('style');
+        return 1;
+      },
+      () => `Limpou estilos`
+    );
   };
 
   const handleMoveElementOut = async (elementId: string) => {
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(htmlContent, 'text/html');
-    const el = doc.querySelector(`[data-editor-id="${elementId}"]`);
-    if (el && el.parentElement && el.parentElement.parentElement && el.parentElement.tagName !== 'BODY') {
-      const parent = el.parentElement;
-      const grandParent = parent.parentElement;
-      if (grandParent) {
+    await applyMutation(
+      (doc) => {
+        const el = doc.querySelector(`[data-editor-id="${elementId}"]`);
+        if (!el || !el.parentElement || !el.parentElement.parentElement || el.parentElement.tagName === 'BODY') return 0;
+        const parent = el.parentElement;
+        const grandParent = parent.parentElement;
+        if (!grandParent) return 0;
         grandParent.insertBefore(el, parent.nextSibling);
-        await updateHtml(doc.documentElement.outerHTML, `Moveu ${el.tagName.toLowerCase()} para fora`);
-      }
-    }
+        return 1;
+      },
+      () => `Moveu elemento para fora`
+    );
   };
 
   // INJECT PRE-DESIGNED PREMIUM COMPONENT
   const handleInsertComponent = async (htmlSnippet: string) => {
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(htmlContent, 'text/html');
-    
-    // Parse the snippet and inject editor IDs starting from max + 1
     const startId = getMaxEditorId(htmlContent) + 1;
     const snippetWithIds = injectEditorIds(htmlSnippet, startId);
-    const parsedSnippetDoc = parser.parseFromString(snippetWithIds, 'text/html');
-    const cleanSnippet = parsedSnippetDoc.body.firstElementChild;
 
-    if (cleanSnippet) {
-      if (selectedElementId) {
-        // Inject inside selected element container
-        const targetContainer = doc.querySelector(`[data-editor-id="${selectedElementId}"]`);
-        if (targetContainer) {
+    await applyMutation(
+      (doc) => {
+        const parsedSnippetDoc = new DOMParser().parseFromString(snippetWithIds, 'text/html');
+        const cleanSnippet = parsedSnippetDoc.body.firstElementChild;
+        if (!cleanSnippet) return 0;
+
+        if (selectedElementId) {
+          const targetContainer = doc.querySelector(`[data-editor-id="${selectedElementId}"]`);
+          if (!targetContainer) return 0;
           targetContainer.appendChild(cleanSnippet);
-          await updateHtml(doc.documentElement.outerHTML, `Injetou componente em ${targetContainer.tagName.toLowerCase()}`);
+        } else if (doc.body) {
+          doc.body.appendChild(cleanSnippet);
+        } else {
+          return 0;
         }
-      } else if (doc.body) {
-        // If nothing selected, append to body
-        doc.body.appendChild(cleanSnippet);
-        await updateHtml(doc.documentElement.outerHTML, `Injetou componente no slide`);
-      }
-    }
+        return 1;
+      },
+      () => selectedElementId ? `Injetou componente` : `Injetou componente no slide`
+    );
   };
 
   // Manual Export (Saves back to disk & triggers download)
@@ -902,26 +891,28 @@ export default function App() {
 
   // Group element under a styled div container
   const handleGroupElement = async (elementId: string) => {
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(htmlContent, 'text/html');
-    const el = doc.querySelector(`[data-editor-id="${elementId}"]`);
-    if (el && el.parentElement) {
-      const parent = el.parentElement;
-      const groupDiv = doc.createElement('div');
-      const startId = getMaxEditorId(htmlContent) + 1;
-      groupDiv.setAttribute('data-editor-id', `el-${startId}`);
-      groupDiv.setAttribute('data-editor-label', 'Grupo');
-      groupDiv.style.display = 'block';
-      groupDiv.style.border = '1px dashed rgba(255, 255, 255, 0.15)';
-      groupDiv.style.padding = '12px';
-      groupDiv.style.borderRadius = '8px';
-      
-      parent.insertBefore(groupDiv, el);
-      groupDiv.appendChild(el);
-      
-      await updateHtml(doc.documentElement.outerHTML, `Agrupou elemento`);
-      setSelectedElementId(`el-${startId}`);
-    }
+    const startId = getMaxEditorId(htmlContent) + 1;
+
+    const count = await applyMutation(
+      (doc) => {
+        const el = doc.querySelector(`[data-editor-id="${elementId}"]`);
+        if (!el || !el.parentElement) return 0;
+        const parent = el.parentElement;
+        const groupDiv = doc.createElement('div');
+        groupDiv.setAttribute('data-editor-id', `el-${startId}`);
+        groupDiv.setAttribute('data-editor-label', 'Grupo');
+        groupDiv.style.display = 'block';
+        groupDiv.style.border = '1px dashed rgba(255, 255, 255, 0.15)';
+        groupDiv.style.padding = '12px';
+        groupDiv.style.borderRadius = '8px';
+
+        parent.insertBefore(groupDiv, el);
+        groupDiv.appendChild(el);
+        return 1;
+      },
+      () => `Agrupou elemento`
+    );
+    if (count > 0) setSelectedElementId(`el-${startId}`);
   };
 
   // Keyboard Shortcuts listener
@@ -1366,7 +1357,7 @@ export default function App() {
             semanticTree={semanticTree}
             selectedElementId={selectedElementId}
             selectedElementIds={selectedElementIds}
-            onSelectElement={handleSelectElement}
+            onSelectElement={handleSelectElementFromPanel}
             hoveredElementId={hoveredElementId}
             onHoverElement={setHoveredElementId}
             files={projectFileList}
@@ -1398,6 +1389,7 @@ export default function App() {
 
         {/* Central Iframe Canvas Workspace (Responsive width & Zoom) */}
         <Canvas
+          ref={canvasRef}
           htmlContent={presentationMode ? presentationHtml : previewHtml}
           selectedElementId={selectedElementId}
           selectedElementIds={selectedElementIds}
@@ -1425,51 +1417,12 @@ export default function App() {
           presentationMode={presentationMode}
         />
 
-
-
-        {/* Floating AI Command Bar (Raycast Design) */}
-        {!presentationMode && activeHtmlPath && (
-          <AIPanel
-            onSendPrompt={handleSendPrompt}
-            apiKey={apiKey}
-            onChangeApiKey={handleSaveApiKey}
-            loading={aiLoading}
-            explanation={aiExplanation}
-            onUndo={handleUndo}
-            canUndo={undoStack.length > 0}
-            
-            pendingChanges={pendingChanges ? {
-              explanation: pendingChanges.explanation,
-              styleCount: pendingChanges.styleMutations.length,
-              contentCount: pendingChanges.contentMutations.length
-            } : null}
-            onApplyChanges={handleApplyChanges}
-            onCancelChanges={handleCancelChanges}
-            onShowDetails={() => setIsDiffModalOpen(true)}
-          />
-        )}
-
-        <DiffReviewModal
-          isOpen={isDiffModalOpen}
-          onClose={() => setIsDiffModalOpen(false)}
-          pendingChanges={pendingChanges}
-          semanticTree={semanticTree}
-          onApply={() => {
-            handleApplyChanges();
-            setIsDiffModalOpen(false);
-          }}
-          onCancel={() => {
-            handleCancelChanges();
-            setIsDiffModalOpen(false);
-          }}
-        />
-
         <CommandPalette
           isOpen={isCommandPaletteOpen}
           onClose={() => setIsCommandPaletteOpen(false)}
           commands={commandPaletteCommands}
           semanticTree={semanticTree}
-          onSelectElement={handleSelectElement}
+          onSelectElement={handleSelectElementFromPanel}
         />
       </div>
     </div>

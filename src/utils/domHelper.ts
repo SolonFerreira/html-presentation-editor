@@ -451,6 +451,17 @@ export function prepareHtmlForPreview(
       [data-editor-hidden="true"] {
         display: none !important;
       }
+
+      /* Momentary highlight when an element is selected from the tree/breadcrumb/search */
+      @keyframes editor-flash-pulse {
+        0% { outline-color: rgba(59, 130, 246, 0.9); background-color: rgba(59, 130, 246, 0.18); }
+        100% { outline-color: rgba(59, 130, 246, 0); background-color: rgba(59, 130, 246, 0); }
+      }
+      .editor-flash-highlight {
+        outline: 2px solid rgba(59, 130, 246, 0.9) !important;
+        outline-offset: 2px;
+        animation: editor-flash-pulse 900ms ease-out;
+      }
     `;
     head.appendChild(helperStyle);
   }

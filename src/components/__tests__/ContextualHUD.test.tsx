@@ -123,36 +123,4 @@ describe('ContextualHUD Component', () => {
     fireEvent.click(heroOption);
     expect(insertMock).toHaveBeenCalledWith('hero');
   });
-
-  it('toggles classes panel, shows class badges and adds new class', () => {
-    const propsWithClasses = {
-      ...defaultProps,
-      attributes: {
-        ...defaultProps.attributes,
-        class: 'bg-blue-500 shadow'
-      }
-    };
-    render(<ContextualHUD {...propsWithClasses} />);
-    const classesToggle = screen.getByTitle('Editar Classes CSS');
-    expect(classesToggle).not.toBeNull();
-
-    fireEvent.click(classesToggle);
-
-    // Should render class pills
-    const pill1 = screen.getByText('bg-blue-500');
-    const pill2 = screen.getByText('shadow');
-    expect(pill1).not.toBeNull();
-    expect(pill2).not.toBeNull();
-
-    // Add new class
-    const input = screen.getByPlaceholderText('nova-classe');
-    fireEvent.change(input, { target: { value: 'rounded-lg' } });
-    
-    // Submit form
-    const submitBtn = screen.getByText('+');
-    fireEvent.click(submitBtn);
-
-    // expect onUpdateStyles to have been called with combined classes
-    expect(defaultProps.onUpdateStyles).toHaveBeenCalledWith({ class: 'bg-blue-500 shadow rounded-lg' });
-  });
 });

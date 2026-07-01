@@ -19,8 +19,7 @@ import {
   Image as ImageIcon,
   LayoutGrid,
   Plus,
-  Component,
-  Hash
+  Component
 } from 'lucide-react';
 
 interface ContextualHUDProps {
@@ -62,9 +61,7 @@ export function ContextualHUD({
   const [showActionsMenu, setShowActionsMenu] = useState(false);
   const [showLayoutDetails, setShowLayoutDetails] = useState(false);
   const [showInsertMenu, setShowInsertMenu] = useState(false);
-  const [showClassesDetails, setShowClassesDetails] = useState(false);
-  const [newClassName, setNewClassName] = useState('');
-  
+
   const tagMenuRef = useRef<HTMLDivElement>(null);
   const actionsMenuRef = useRef<HTMLDivElement>(null);
   const insertMenuRef = useRef<HTMLDivElement>(null);
@@ -379,20 +376,6 @@ export function ContextualHUD({
           )}
         </div>
       )}
-
-      {/* Classes toggle button */}
-      <button
-        onClick={() => setShowClassesDetails(!showClassesDetails)}
-        className={`flex items-center gap-1 px-1.5 py-0.5 rounded hover:bg-slate-800 cursor-pointer ${
-          showClassesDetails ? 'text-blue-400 bg-slate-800 font-bold' : 'text-slate-400'
-        }`}
-        title="Editar Classes CSS"
-      >
-        <Hash className="w-3.5 h-3.5" />
-        <span className="text-[10px]">Classes</span>
-      </button>
-
-      <div className="w-px h-5 bg-slate-800/80 mx-0.5" />
 
       {/* 5. DOM STRUCTURAL ACTIONS DROPDOWN */}
       <div className="relative" ref={actionsMenuRef}>
@@ -713,76 +696,6 @@ export function ContextualHUD({
         </div>
       )}
 
-      {/* Row 3: Classes details */}
-      {showClassesDetails && (() => {
-        const classList = attributes.class
-          ? attributes.class.split(/\s+/).filter(c => c && !c.startsWith('data-editor-'))
-          : [];
-
-        const handleRemoveClass = (clsToRemove: string) => {
-          const updated = classList.filter(c => c !== clsToRemove).join(' ');
-          onUpdateStyles({ class: updated });
-        };
-
-        const handleAddClass = (e: React.FormEvent) => {
-          e.preventDefault();
-          const cleanName = newClassName.trim().replace(/\s+/g, '-');
-          if (cleanName && !classList.includes(cleanName)) {
-            const updated = [...classList, cleanName].join(' ');
-            onUpdateStyles({ class: updated });
-          }
-          setNewClassName('');
-        };
-
-        return (
-          <div className="flex items-center gap-1.5 mt-1.5 bg-slate-950/80 border-t border-slate-800/80 pt-2 px-1.5 pb-1 rounded-b flex-wrap">
-            <span className="text-[9px] text-slate-500 font-bold uppercase tracking-wider flex items-center gap-1">
-              <Hash className="w-3 h-3 text-slate-500" />
-              Classes:
-            </span>
-
-            {/* Render Class Badges */}
-            <div className="flex items-center gap-1 flex-wrap">
-              {classList.length === 0 ? (
-                <span className="text-[10px] text-slate-600 italic">Nenhuma classe aplicada</span>
-              ) : (
-                classList.map(cls => (
-                  <span 
-                    key={cls}
-                    className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-slate-800 text-blue-300 font-mono text-[9px] border border-slate-700/50"
-                  >
-                    {cls}
-                    <button
-                      type="button"
-                      onClick={() => handleRemoveClass(cls)}
-                      className="text-slate-500 hover:text-red-400 font-bold text-[10px] px-0.5 focus:outline-none cursor-pointer"
-                    >
-                      ×
-                    </button>
-                  </span>
-                ))
-              )}
-            </div>
-
-            {/* Input to add class */}
-            <form onSubmit={handleAddClass} className="flex items-center gap-1 ml-auto">
-              <input
-                type="text"
-                placeholder="nova-classe"
-                value={newClassName}
-                onChange={(e) => setNewClassName(e.target.value)}
-                className="bg-slate-900 border border-slate-800 text-[10px] px-1.5 py-0.5 rounded w-24 text-slate-300 focus:outline-none focus:border-blue-500 font-mono"
-              />
-              <button
-                type="submit"
-                className="px-1.5 py-0.5 bg-blue-600 hover:bg-blue-700 text-white rounded text-[10px] font-bold cursor-pointer"
-              >
-                +
-              </button>
-            </form>
-          </div>
-        );
-      })()}
     </div>
   );
 }
